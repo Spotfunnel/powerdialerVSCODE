@@ -113,6 +113,14 @@ export function MessageThread({ conversationId, leadId, participantName, onMessa
     // Initial Send Click
     const handleSendClick = () => {
         if (!inputValue.trim() || !leadId) return;
+        if (!selectedNumber && availableNumbers.length === 0) {
+            addNotification({
+                type: 'error',
+                title: 'No Sender Number',
+                message: 'No Twilio numbers available. Ask your admin to configure the number pool.'
+            });
+            return;
+        }
 
         const bodyToSend = inputValue;
         setPendingBody(bodyToSend);

@@ -41,14 +41,14 @@ export async function POST(req: Request) {
     }
 
     try {
-        const { to, body, leadId } = parsedBody;
+        const { to, body, leadId, from } = parsedBody;
 
         // LOG REQUEST ATTEMPT (Authenticated)
         try {
             await prisma.auditLog.create({
                 data: {
                     eventType: "SMS_API_ATTEMPT",
-                    payload: JSON.stringify({ userId: (session.user as any).id, to, leadId, bodySnippet: body?.substring(0, 10) })
+                    payload: JSON.stringify({ userId: (session.user as any).id, to, leadId, from, bodySnippet: body?.substring(0, 10) })
                 }
             });
         } catch (e) { }
@@ -85,7 +85,8 @@ export async function POST(req: Request) {
             to: recipientsNumber,
             body,
             leadId,
-            userId
+            userId,
+            from: from || undefined
         });
 
         return NextResponse.json({ success: true, message });

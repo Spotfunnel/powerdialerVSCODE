@@ -12,9 +12,14 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        // Fetch conversations
-        // Optimize: Include latest message
+        // Fetch conversations - filtered by user ownership
         const conversations = await prisma.conversation.findMany({
+            where: {
+                OR: [
+                    { assignedUserId: session.user.id },
+                    { assignedUserId: null }
+                ]
+            },
             orderBy: { lastMessageAt: 'desc' },
             include: {
                 contact: true,

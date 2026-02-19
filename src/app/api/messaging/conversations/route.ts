@@ -16,13 +16,9 @@ export async function GET(req: Request) {
         const whereClause: any = {
             OR: [
                 { assignedUserId: session.user.id },
-                { assignedUserId: null } // Allow seeing unassigned? Or strictly assigned? 
-                // User said "Should be user specific", so maybe only assigned to ME.
+                { assignedUserId: null }
             ]
         };
-
-        // If strict isolation is requested:
-        whereClause.assignedUserId = session.user.id;
 
         if (status !== 'ALL') {
             whereClause.status = status;
@@ -82,8 +78,20 @@ export async function GET(req: Request) {
             }
         });
 
+        // Avatar color palette for consistent per-conversation coloring
+        const avatarColors = [
+            "bg-teal-100 text-teal-700",
+            "bg-blue-100 text-blue-700",
+            "bg-purple-100 text-purple-700",
+            "bg-amber-100 text-amber-700",
+            "bg-rose-100 text-rose-700",
+            "bg-emerald-100 text-emerald-700",
+            "bg-indigo-100 text-indigo-700",
+            "bg-orange-100 text-orange-700",
+        ];
+
         // Format for UI
-        const formatted = conversations.map(c => ({
+        const formatted = conversations.map((c, i) => ({
             id: c.id,
             contactName: c.contact ? `${c.contact.firstName || ''} ${c.contact.lastName || ''}`.trim() || c.contact.companyName : 'Unknown Contact',
             contactPhone: c.contactPhone,
@@ -93,7 +101,8 @@ export async function GET(req: Request) {
             lastMessageAt: c.lastMessageAt,
             status: c.status,
             assignedTo: c.assignedUser?.name || 'Unassigned',
-            contactId: c.contactId
+            contactId: c.contactId,
+            avatarColor: avatarColors[i % avatarColors.length]
         }));
 
         return NextResponse.json(formatted);

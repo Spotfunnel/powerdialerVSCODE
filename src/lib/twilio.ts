@@ -219,9 +219,21 @@ export async function sendSMS(
                 data: {
                     contactPhone: cleanTo,
                     contactId: leadId,
+                    assignedUserId: userId || null,
                     lastMessageAt: new Date(),
                     status: "OPEN",
                     twilioNumberId: twilioNumberId
+                }
+            });
+        } else {
+            // Update lastMessageAt and ensure the conversation is OPEN
+            conversation = await prisma.conversation.update({
+                where: { id: conversation.id },
+                data: {
+                    lastMessageAt: new Date(),
+                    status: "OPEN",
+                    // If no one is assigned yet, assign the sender
+                    ...(!conversation.assignedUserId && userId ? { assignedUserId: userId } : {})
                 }
             });
         }

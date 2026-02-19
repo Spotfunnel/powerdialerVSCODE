@@ -96,3 +96,5 @@ users.json
 
 # scripts junk
 scripts/list-all.json
+
+.vercel
