@@ -1,0 +1,35 @@
+{
+    "id": "/",
+    "name": "PowerDialer Pro",
+    "short_name": "PowerDialer",
+    "description": "Premium Outbound Telephony & CRM",
+    "start_url": "/dialer",
+    "scope": "/",
+    "display": "standalone",
+    "display_override": [
+        "window-controls-overlay",
+        "standalone"
+    ],
+    "orientation": "portrait",
+    "background_color": "#09090b",
+    "theme_color": "#14b8a6",
+    "categories": [
+        "business",
+        "productivity",
+        "utilities"
+    ],
+    "icons": [
+        {
+            "src": "/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}

@@ -1,0 +1,107 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  @font-face {
+    font-family: 'Roobert';
+    src: url('/fonts/RoobertTRIALVF-BF67243fd545701.ttf') format('truetype');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
+
+  :root {
+    /* SpotFunnel - Unified Coherent Light Theme */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    /* Zinc-950 (#09090b) - No more pure black */
+    /* Absolute Black */
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --primary: 173 58% 39%;
+    /* Professional Teal */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 173 58% 95%;
+    /* Light Teal Tint */
+    --secondary-foreground: 173 58% 20%;
+
+    --muted: 210 20% 98%;
+    --muted-foreground: 240 3.8% 46.1%;
+    /* Darkened from 45% */
+    /* Darker for accessibility */
+
+    --accent: 173 58% 98%;
+    --accent-foreground: 173 58% 30%;
+
+    --destructive: 0 84.2% 50.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 240 5.9% 90%;
+    /* Zinc-200 base */
+    --input: 214.3 31.8% 91.4%;
+    --ring: 173 58% 39%;
+
+    --radius: 1rem;
+
+    /* UI Logic States */
+    --state-idle: 0 0% 40%;
+    --state-ringing: 45 93% 47%;
+    --state-connected: 173 58% 39%;
+    --state-failed: 0 84.2% 50.2%;
+    --state-voicemail: 270 76% 55%;
+
+    /* Coherent Glass Effects */
+    --glass-bg: 0 0% 100% / 0.8;
+    --glass-border: 0 0% 0% / 0.05;
+    --glow-primary: 173 58% 39% / 0.05;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    font-family: 'Roobert', sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Roobert', sans-serif;
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-zinc-200 rounded-full hover:bg-zinc-300 transition-colors;
+  }
+
+  /* Mobile Optimization Utilities */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .mini-dialer-active {
+    grid-template-rows: 1fr auto;
+  }
+
+  @media (max-width: 1024px) {
+    .pwa-hide {
+      display: none !important;
+    }
+  }
+}

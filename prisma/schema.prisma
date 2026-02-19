@@ -1,0 +1,317 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-1.0.x", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("POSTGRES_PRISMA_URL")
+  directUrl = env("POSTGRES_URL_NON_POOLING")
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  email              String              @unique
+  name               String?
+  passwordHash       String
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  repPhoneNumber     String?
+  role               String              @default("REP")
+  auditLogs          AuditLog[]
+  calendarConnection CalendarConnection?
+  calls              Call[]
+  callbacks          Callback[]
+  assignedLeads      Lead[]              @relation("AssignedLeads")
+  lockedLeads        Lead[]              @relation("LockedLeads")
+  meetings           Meeting[]
+  messages           Message[]
+  activities         LeadActivity[]
+  lastSeenAt         DateTime?           // For Presence Heartbeat
+  phones             NumberPool[]        // Numbers owned by this user
+  conversations      Conversation[]
+  lastInteractions   LastInteractionMap[]
+  pushSubscriptions  PushSubscription[]
+}
+
+model CalendarConnection {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  provider     String
+  accessToken  String
+  refreshToken String?
+  expiry       DateTime?
+  senderName   String?   // "Kye Walker"
+  senderEmail  String?   // "kye@getspotfunnel.com" - Must be a valid alias in Gmail
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id])
+}
+
+model Lead {
+  id               String     @id @default(cuid())
+  firstName        String?
+  lastName         String?
+  companyName      String
+  phoneNumber      String     @unique
+  website          String?
+  attempts         Int        @default(0)
+  lastCalledAt     DateTime?
+  nextCallAt       DateTime?
+  lockedAt         DateTime?
+  lockedById       String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  assignedToId     String?
+  email            String?
+  employees        Int?       @default(0)
+  industry         String?
+  location         String?
+  notes            String?
+  priority         String     @default("B")
+  source           String     @default("MANUAL")
+  status           String     @default("READY")
+  campaignId       String?
+  campaign         Campaign?  @relation(fields: [campaignId], references: [id])
+  address          String?
+  postcode         String?
+  state            String?
+  suburb           String?
+  calls            Call[]
+  callbacks        Callback[]
+  activities       LeadActivity[]
+  assignedTo       User?      @relation("AssignedLeads", fields: [assignedToId], references: [id])
+  lockedBy         User?      @relation("LockedLeads", fields: [lockedById], references: [id])
+  meetings         Meeting[]
+  messages         Message[]
+  conversations    Conversation[]
+
+
+  @@index([nextCallAt])
+  @@index([companyName])
+  @@index([firstName])
+  @@index([lastName])
+  @@index([email])
+  @@index([status])
+}
+
+model Call {
+  id           String   @id @default(cuid())
+  leadId       String
+  twilioSid    String?  @unique
+  fromNumber   String
+  toNumber     String
+  outcome      String?
+  notes        String?
+  recordingUrl String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  direction    String   @default("OUTBOUND")
+  duration     Int      @default(0)
+  status       String
+  userId       String
+  lead         Lead     @relation(fields: [leadId], references: [id])
+  user         User     @relation(fields: [userId], references: [id])
+}
+
+model Callback {
+  id         String   @id @default(cuid())
+  leadId     String
+  userId     String
+  callbackAt DateTime
+  status     String   @default("PENDING")
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  lead       Lead     @relation(fields: [leadId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([callbackAt])
+}
+
+model Meeting {
+  id              String   @id @default(cuid())
+  leadId          String
+  userId          String
+  startAt         DateTime
+  endAt           DateTime
+  title           String
+  externalEventId String?  @unique
+  provider        String?
+  meetingUrl      String?
+  calendarUrl     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lead            Lead     @relation(fields: [leadId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
+}
+
+model SyncJob {
+  id        String   @id @default(cuid())
+  type      String
+  payload   String
+  attempts  Int      @default(0)
+  lastError String?
+  status    String   @default("PENDING")
+  nextRunAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model NumberPool {
+  id            String    @id @default(cuid())
+  phoneNumber   String    @unique
+  isActive      Boolean   @default(true)
+  dailyCount    Int       @default(0)
+  lastUsedAt    DateTime?
+  cooldownUntil DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  regionTag     String?
+  ownerUserId   String?
+  owner             User?          @relation(fields: [ownerUserId], references: [id])
+  conversations     Conversation[]
+  lastInteractions  LastInteractionMap[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  eventType String
+  payload   String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+model Settings {
+  id                  String   @id @default("singleton")
+  twilioAccountSid    String?
+  twilioAuthToken     String?
+  twilioAppSid        String?
+  webhookBaseUrl      String?
+  maxAttempts         Int      @default(5)
+  dailyNumberCap      Int      @default(100)
+  setupCompleted      Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+  numberCooldownMin   Int      @default(60)
+  twilioFromNumbers   String?
+  twilioApiKey        String?
+  twilioApiSecret     String?
+}
+
+model Message {
+  id               String        @id @default(cuid())
+  conversationId   String
+  conversation     Conversation  @relation(fields: [conversationId], references: [id])
+  direction        String        // INBOUND, OUTBOUND
+  fromNumber       String
+  toNumber         String
+  body             String
+  status           String        // QUEUED, SENT, DELIVERED, FAILED, RECEIVED
+  twilioMessageSid String?       @unique
+  errorCode        String?
+  errorMessage     String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  sentAt           DateTime?
+  receivedAt       DateTime?
+
+  // Legacy fields (optional support or removal)
+  leadId           String?
+  userId           String?
+  lead             Lead?         @relation(fields: [leadId], references: [id])
+  user             User?         @relation(fields: [userId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@index([twilioMessageSid])
+}
+
+model Conversation {
+  id              String    @id @default(cuid())
+  contactId       String?
+  contactPhone    String
+  assignedUserId  String?
+  twilioNumberId  String?   // The "From" number ID (NumberPool id)
+  lastMessageAt   DateTime  @default(now())
+  unreadCount     Int       @default(0)
+  status          String    @default("OPEN") // OPEN, CLOSED, ARCHIVED
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  contact         Lead?       @relation(fields: [contactId], references: [id])
+  assignedUser    User?       @relation(fields: [assignedUserId], references: [id])
+  twilioNumber    NumberPool? @relation(fields: [twilioNumberId], references: [id])
+  messages        Message[]
+
+  @@unique([contactPhone, twilioNumberId])
+  @@index([contactPhone])
+  @@index([lastMessageAt])
+}
+
+model LastInteractionMap {
+  id                 String    @id @default(cuid())
+  customerPhone      String    @unique
+  lastUserId         String?
+  lastChannel        String    // CALL, SMS
+  lastInteractionAt  DateTime  @default(now())
+  lastTwilioNumberId String?
+
+  lastUser           User?       @relation(fields: [lastUserId], references: [id])
+  lastTwilioNumber   NumberPool? @relation(fields: [lastTwilioNumberId], references: [id])
+
+  @@index([customerPhone])
+  @@index([lastInteractionAt])
+}
+
+model WebhookPing {
+  id         String   @id @default(cuid())
+  source     String
+  data       String
+  receivedAt DateTime @default(now())
+}
+
+model TwilioLog {
+  id           String   @id @default(cuid())
+  timestamp    DateTime @default(now())
+  fromNumber   String
+  toNumber     String
+  direction    String   @default("INBOUND")
+  twimlContent String?  @db.Text
+  errorCode    String? 
+  errorMessage String?
+}
+
+model LeadActivity {
+  id        String   @id @default(cuid())
+  leadId    String
+  userId    String?
+  type      String   // CALL, SMS, NOTE, SYSTEM
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  
+  lead Lead @relation(fields: [leadId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([leadId])
+  @@index([createdAt])
+}
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Campaign {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  leads     Lead[]
+}

@@ -1,0 +1,98 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# logs
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# temp / intermediate
+.tmp/
+.tmp_reference_dialer/
+.tmp-private-key.txt
+.tmp-public-key.txt
+
+# data files (never commit PII/lead data)
+*.csv
+
+# archives
+*.zip
+
+# encoded secrets
+*.b64
+
+# sensitive keys & credentials
+credentials.json
+token.json
+
+# global ignores for junk file types at root
+/*.txt
+/*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!components.json
+!.eslintrc.json
+/*.js
+!next.config.js
+!postcss.config.js
+/*.py
+/*.sh
+/*.html
+
+# debug JSON anywhere
+debug_*.json
+audit_output.json
+status_output.json
+pool_check.json
+verification_result.json
+last_sms_failure_full.json
+last_meetings.json
+latest_failures.json
+vapid.json
+users.json
+
+# scripts with hardcoded credentials (one-off debug scripts)
+/scripts/fix-twilio-settings.js
+/scripts/seed-settings-hardcoded.ts
+/scripts/update_credentials_direct.js
+
+# brain scratch
+/brain/
+
+# scripts junk
+scripts/list-all.json
