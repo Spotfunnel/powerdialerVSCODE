@@ -337,18 +337,20 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
             {/* TOP LEFT RE-ORGANIZED: Campaign + Lead History + Notes */}
             <div className="absolute top-2 left-2 z-20 flex flex-col gap-4 p-2 overflow-visible">
                 {/* CAMPAIGN SELECTOR */}
-                <div className="flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity">
-                    <Building2 className="h-3 w-3 text-zinc-400" />
+                <div className="flex items-center gap-2 bg-white/80 backdrop-blur-sm px-3 py-2 rounded-xl border border-zinc-200/50 shadow-sm">
+                    <Building2 className="h-4 w-4 text-teal-600 shrink-0" />
                     <select
                         value={campaignId || ""}
                         onChange={(e) => {
                             setCampaignId(e.target.value || null);
                         }}
-                        className="bg-transparent text-[9px] font-black uppercase tracking-widest text-zinc-400 border-none outline-none cursor-pointer hover:text-teal-600 focus:ring-0 py-0 pl-0 pr-6"
+                        className="bg-transparent text-[11px] font-black uppercase tracking-widest text-zinc-700 border-none outline-none cursor-pointer hover:text-teal-600 focus:ring-0 py-0 pl-0 pr-6"
                     >
                         <option value="">All Campaigns</option>
                         {campaigns.map((c: any) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
+                            <option key={c.id} value={c.id}>
+                                {c.name} {c._count ? `(${c._count.leads})` : ""}
+                            </option>
                         ))}
                     </select>
                 </div>

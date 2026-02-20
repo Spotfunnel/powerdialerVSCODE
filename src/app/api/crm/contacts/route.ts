@@ -22,11 +22,16 @@ export async function GET(req: Request) {
 
         const skip = (page - 1) * pageSize;
 
+        const campaignId = searchParams.get("campaignId") || "";
         const where: Prisma.LeadWhereInput = {};
 
         // Only apply status filter if NOT searching (or if explicitly asking for ALL)
         if (status !== 'ALL' && !search) {
             where.status = status;
+        }
+
+        if (campaignId) {
+            where.campaignId = campaignId;
         }
 
         if (search) {
@@ -61,6 +66,8 @@ export async function GET(req: Request) {
                         lastCalledAt: true,
                         priority: true,
                         createdAt: true,
+                        campaignId: true,
+                        campaign: { select: { id: true, name: true } },
                         assignedTo: {
                             select: {
                                 id: true,

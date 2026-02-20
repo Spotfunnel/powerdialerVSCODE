@@ -38,6 +38,21 @@ export default function ContactsPage() {
     const pageSize = 50;
     const { showToast } = useToast();
 
+    // Campaign filter
+    const [campaigns, setCampaigns] = useState<any[]>([]);
+    const [campaignFilter, setCampaignFilter] = useState("");
+
+    // Bulk selection
+    const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+    const [bulkCampaign, setBulkCampaign] = useState("");
+
+    useEffect(() => {
+        fetch("/api/campaigns")
+            .then(res => res.json())
+            .then(data => { if (Array.isArray(data)) setCampaigns(data); })
+            .catch(err => console.error("Failed to fetch campaigns", err));
+    }, []);
+
     // Confirm States
     const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
     const [dedupConfirmOpen, setDedupConfirmOpen] = useState(false);
@@ -70,6 +85,7 @@ export default function ContactsPage() {
                 sortOrder
             });
             params.append("status", statusFilter);
+            if (campaignFilter) params.append("campaignId", campaignFilter);
             const baseUrl = window.location.origin;
             const res = await fetch(`${baseUrl}/api/crm/contacts?${params.toString()}`);
             if (res.ok) {
@@ -87,7 +103,7 @@ export default function ContactsPage() {
 
     useEffect(() => {
         fetchLeads();
-    }, [page, statusFilter, sortBy, sortOrder]);
+    }, [page, statusFilter, sortBy, sortOrder, campaignFilter]);
 
     const [wizardState, setWizardState] = useState<{ isOpen: boolean; leadId: string; companyName: string } | null>(null);
 
@@ -212,6 +228,48 @@ export default function ContactsPage() {
         }
     };
 
+    const toggleSelectLead = useCallback((leadId: string) => {
+        setSelectedLeads(prev => {
+            const next = new Set(prev);
+            if (next.has(leadId)) next.delete(leadId);
+            else next.add(leadId);
+            return next;
+        });
+    }, []);
+
+    const toggleSelectAll = useCallback(() => {
+        if (selectedLeads.size === leads.length) {
+            setSelectedLeads(new Set());
+        } else {
+            setSelectedLeads(new Set(leads.map(l => l.id)));
+        }
+    }, [leads, selectedLeads.size]);
+
+    const handleBulkAssign = async () => {
+        if (!bulkCampaign || selectedLeads.size === 0) return;
+        const campaignId = bulkCampaign === "__none__" ? null : bulkCampaign;
+        try {
+            const res = await fetch("/api/crm/bulk-assign", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ leadIds: Array.from(selectedLeads), campaignId })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                showToast(`${data.count} leads updated`, 'success');
+                setSelectedLeads(new Set());
+                setBulkCampaign("");
+                fetchLeads();
+                // Refresh campaign counts
+                fetch("/api/campaigns").then(r => r.json()).then(d => { if (Array.isArray(d)) setCampaigns(d); });
+            } else {
+                showToast("Failed to assign campaign", 'error');
+            }
+        } catch (e) {
+            showToast("Failed to assign campaign", 'error');
+        }
+    };
+
     const handleExportCSV = () => {
         const headers = columns.filter(c => c.visible).map(c => c.label).join(",");
         const rows = leads.map(l => {
@@ -265,6 +323,16 @@ export default function ContactsPage() {
                         />
                     </div>
                     <div className="flex items-center gap-2">
+                        <select
+                            value={campaignFilter}
+                            onChange={(e) => { setCampaignFilter(e.target.value); setPage(1); setSelectedLeads(new Set()); }}
+                            className="h-10 sm:h-12 px-3 sm:px-4 bg-white border-2 border-zinc-200 hover:border-zinc-400 rounded-xl sm:rounded-2xl text-[10px] font-black text-zinc-600 uppercase tracking-widest cursor-pointer outline-none transition-all"
+                        >
+                            <option value="">All Campaigns</option>
+                            {campaigns.map((c: any) => (
+                                <option key={c.id} value={c.id}>{c.name} ({c._count?.leads ?? 0})</option>
+                            ))}
+                        </select>
                         <button
                             onClick={() => setDedupConfirmOpen(true)}
                             className="h-10 sm:h-12 px-3 sm:px-6 bg-white border-2 border-zinc-200 hover:border-zinc-900 hover:bg-zinc-50 text-zinc-500 hover:text-zinc-900 rounded-xl sm:rounded-2xl text-[10px] font-black tracking-[0.2em] flex items-center gap-2 sm:gap-3 transition-all active:scale-95 shadow-sm"
@@ -296,6 +364,14 @@ export default function ContactsPage() {
                 <table className="w-full border-collapse table-fixed min-w-[900px] hidden lg:table" style={{ touchAction: 'pan-x pan-y' }}>
                     <thead className="sticky top-0 bg-white border-b border-zinc-100 z-10 shadow-sm">
                         <tr>
+                            <th className="w-10 px-3 py-3">
+                                <input
+                                    type="checkbox"
+                                    checked={leads.length > 0 && selectedLeads.size === leads.length}
+                                    onChange={toggleSelectAll}
+                                    className="h-3.5 w-3.5 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
+                                />
+                            </th>
                             {columns.filter(c => c.visible).map(col => (
                                 <th
                                     key={col.id}
@@ -334,6 +410,8 @@ export default function ContactsPage() {
                                 onContactClick={handleContactClick}
                                 onWizardClick={handleWizardClick}
                                 onMessageClick={handleMessageClick}
+                                isSelected={selectedLeads.has(lead.id)}
+                                onToggleSelect={() => toggleSelectLead(lead.id)}
                             />
                         ))}
                     </tbody>
@@ -359,6 +437,39 @@ export default function ContactsPage() {
                     ))}
                 </div>
             </div>
+
+            {/* Bulk Action Bar */}
+            {selectedLeads.size > 0 && (
+                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 bg-zinc-900 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-4">
+                    <span className="text-[10px] font-black uppercase tracking-widest">
+                        {selectedLeads.size} selected
+                    </span>
+                    <select
+                        value={bulkCampaign}
+                        onChange={(e) => setBulkCampaign(e.target.value)}
+                        className="bg-zinc-800 text-white text-xs font-bold px-3 py-2 rounded-lg border border-zinc-700"
+                    >
+                        <option value="">Move to Campaign...</option>
+                        <option value="__none__">Remove from Campaign</option>
+                        {campaigns.map((c: any) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={handleBulkAssign}
+                        disabled={!bulkCampaign}
+                        className="px-4 py-2 bg-teal-500 hover:bg-teal-600 rounded-lg text-[10px] font-black uppercase disabled:opacity-50 transition-all"
+                    >
+                        Apply
+                    </button>
+                    <button
+                        onClick={() => { setSelectedLeads(new Set()); setBulkCampaign(""); }}
+                        className="text-zinc-400 hover:text-white text-xs transition-colors"
+                    >
+                        Clear
+                    </button>
+                </div>
+            )}
 
             <footer className="px-4 py-3 border-t border-zinc-100 bg-zinc-50/50 flex items-center justify-between shrink-0">
                 <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">

@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect } from "react";
 import {
     Layout, Plus, Zap, CheckCircle2, Target, Send,
     AlertCircle, FileText, Loader2, Trash2, Phone,
-    GripVertical
+    GripVertical, Building2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
@@ -236,6 +236,15 @@ export default function PipelinePage() {
     const [leads, setLeads] = useState<Lead[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeLead, setActiveLead] = useState<Lead | null>(null);
+    const [campaigns, setCampaigns] = useState<any[]>([]);
+    const [campaignFilter, setCampaignFilter] = useState("");
+
+    useEffect(() => {
+        fetch("/api/campaigns")
+            .then(res => res.json())
+            .then(data => { if (Array.isArray(data)) setCampaigns(data); })
+            .catch(err => console.error("Failed to fetch campaigns", err));
+    }, []);
 
     const pipelines = useMemo(() => PIPELINE_STAGES.map(stage => ({
         ...stage,
@@ -257,7 +266,8 @@ export default function PipelinePage() {
         setLoading(true);
         try {
             const baseUrl = window.location.origin;
-            const res = await fetch(`${baseUrl}/api/crm/pipeline/leads`);
+            const params = campaignFilter ? `?campaignId=${campaignFilter}` : "";
+            const res = await fetch(`${baseUrl}/api/crm/pipeline/leads${params}`);
             if (res.ok) {
                 const data = await res.json();
                 setLeads(data.leads || []);
@@ -274,7 +284,7 @@ export default function PipelinePage() {
 
     useEffect(() => {
         fetchLeads();
-    }, []);
+    }, [campaignFilter]);
 
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
@@ -423,6 +433,16 @@ export default function PipelinePage() {
                 </div>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                    <select
+                        value={campaignFilter}
+                        onChange={(e) => setCampaignFilter(e.target.value)}
+                        className="h-10 px-4 bg-white border border-zinc-200 rounded-xl text-[10px] font-black text-zinc-600 uppercase tracking-widest cursor-pointer outline-none hover:border-teal-400 transition-all"
+                    >
+                        <option value="">All Campaigns</option>
+                        {campaigns.map((c: any) => (
+                            <option key={c.id} value={c.id}>{c.name} ({c._count?.leads ?? 0})</option>
+                        ))}
+                    </select>
                     <button onClick={fetchLeads} className={cn("p-3 bg-white hover:bg-zinc-50 text-zinc-400 rounded-xl border border-zinc-200 transition-all hover:text-teal-600 shadow-sm", loading && "animate-spin text-teal-600")}>
                         <Zap className="h-4 w-4" />
                     </button>

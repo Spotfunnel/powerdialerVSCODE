@@ -10,14 +10,28 @@ interface ContactRowProps {
     onContactClick: (id: string) => void;
     onWizardClick: (lead: any) => void;
     onMessageClick: (id: string) => void;
+    isSelected?: boolean;
+    onToggleSelect?: () => void;
 }
 
-export const ContactRow = memo(({ lead, columns, onContactClick, onWizardClick, onMessageClick }: ContactRowProps) => {
+export const ContactRow = memo(({ lead, columns, onContactClick, onWizardClick, onMessageClick, isSelected, onToggleSelect }: ContactRowProps) => {
     return (
         <tr
             onClick={() => onContactClick(lead.id)}
-            className="group hover:bg-teal-50/30 transition-colors cursor-pointer focus:outline-none focus:bg-teal-50"
+            className={cn(
+                "group hover:bg-teal-50/30 transition-colors cursor-pointer focus:outline-none focus:bg-teal-50",
+                isSelected && "bg-teal-50/50"
+            )}
         >
+            <td className="w-10 px-3 py-4">
+                <input
+                    type="checkbox"
+                    checked={!!isSelected}
+                    onChange={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-3.5 w-3.5 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
+                />
+            </td>
             {columns.filter(c => c.visible).map(col => {
                 switch (col.id) {
                     case 'companyName':

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { useNotification } from "@/contexts/NotificationContext";
 import { normalizeToE164 } from "@/lib/phone-utils";
@@ -221,6 +221,17 @@ export function LeadProvider({ children }: { children: ReactNode }) {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [leadIdParam]); // Only re-run if the URL param actually changes
+
+    // Auto-fetch next lead when campaign changes
+    const isInitialCampaignRender = useRef(true);
+    useEffect(() => {
+        if (isInitialCampaignRender.current) {
+            isInitialCampaignRender.current = false;
+            return;
+        }
+        fetchNextLead();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [campaignId]);
 
     return (
         <LeadContext.Provider value={{

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, Phone, BarChart3, Settings, LogOut, Shield, RefreshCw } from "lucide-react";
+import { Users, Phone, BarChart3, Settings, LogOut, Shield, RefreshCw, Building2 } from "lucide-react";
 import { AutoConfigureButton } from "@/components/admin/AutoConfigureButton";
 import { AdminLiveStatus } from "@/components/AdminLiveStatus";
 
@@ -49,7 +49,27 @@ export default function AdminPage() {
                     </CardContent>
                 </Card>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+                    {/* CAMPAIGNS */}
+                    <Card className="bg-white border-slate-200 shadow-sm">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Building2 className="h-5 w-5 text-amber-600" />
+                                Campaigns
+                            </CardTitle>
+                            <CardDescription>Create and manage lead campaigns for the dialer.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <Button
+                                onClick={() => router.push('/admin/campaigns')}
+                                className="w-full bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+                            >
+                                <Settings className="mr-2 h-4 w-4" />
+                                Manage Campaigns
+                            </Button>
+                        </CardContent>
+                    </Card>
 
                     {/* TWILIO CONFIGURATION */}
                     <Card className="bg-white border-slate-200 shadow-sm">

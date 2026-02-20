@@ -1,12 +1,21 @@
 "use client";
 
-import { useState } from "react";
-import { UploadCloud, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { UploadCloud, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, Building2 } from "lucide-react";
 
 export default function ImportPage() {
     const [file, setFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState(false);
     const [status, setStatus] = useState<any>(null);
+    const [campaigns, setCampaigns] = useState<any[]>([]);
+    const [selectedCampaignId, setSelectedCampaignId] = useState("");
+
+    useEffect(() => {
+        fetch("/api/campaigns")
+            .then(res => res.json())
+            .then(data => { if (Array.isArray(data)) setCampaigns(data); })
+            .catch(err => console.error("Failed to fetch campaigns", err));
+    }, []);
 
     const handleUpload = async () => {
         if (!file) return;
@@ -15,6 +24,9 @@ export default function ImportPage() {
 
         const formData = new FormData();
         formData.append("file", file);
+        if (selectedCampaignId) {
+            formData.append("campaignId", selectedCampaignId);
+        }
 
         try {
             const res = await fetch("/api/crm/import", {
@@ -23,7 +35,7 @@ export default function ImportPage() {
             });
             const data = await res.json();
             if (res.ok) {
-                setStatus({ success: true, count: data.count });
+                setStatus({ success: true, count: data.count, created: data.created, updated: data.updated });
             } else {
                 setStatus({ success: false, error: data.error });
             }
@@ -47,6 +59,26 @@ export default function ImportPage() {
                         <br />
                         <span className="font-mono text-xs">Required: Phone, Company</span>
                     </p>
+                </div>
+
+                {/* CAMPAIGN SELECTOR */}
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest flex items-center gap-1.5">
+                        <Building2 className="h-3 w-3" />
+                        Assign to Campaign
+                    </label>
+                    <select
+                        value={selectedCampaignId}
+                        onChange={(e) => setSelectedCampaignId(e.target.value)}
+                        className="w-full h-10 px-3 bg-background border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                    >
+                        <option value="">No Campaign</option>
+                        {campaigns.map((c: any) => (
+                            <option key={c.id} value={c.id}>
+                                {c.name} {c._count ? `(${c._count.leads} leads)` : ""}
+                            </option>
+                        ))}
+                    </select>
                 </div>
 
                 <div className="border-2 border-dashed border-border rounded-xl p-8 hover:bg-muted/50 transition-colors relative">
@@ -76,7 +108,9 @@ export default function ImportPage() {
                     <div className={`p-4 rounded-xl flex items-center gap-3 ${status.success ? 'bg-green-500/10 text-green-700' : 'bg-red-500/10 text-red-700'}`}>
                         {status.success ? <CheckCircle className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
                         <div className="text-sm font-medium">
-                            {status.success ? `Successfully injected ${status.count} leads!` : status.error}
+                            {status.success
+                                ? `Injected ${status.count} leads (${status.created} new, ${status.updated} updated)`
+                                : status.error}
                         </div>
                     </div>
                 )}

@@ -13,22 +13,22 @@ export async function GET(req: Request) {
     }
 
     try {
-        // Extract active statuses from the config
+        const { searchParams } = new URL(req.url);
+        const campaignId = searchParams.get("campaignId");
+
         const activeStatuses = PIPELINE_STAGES.map(s => s.status);
 
-        // Fetch leads only in these statuses
-        // We might want to limit 'READY' leads if there are too many, 
-        // effectively treating it as a "Backlog" view.
-        // For now, let's execute a single efficient query.
+        const where: any = {
+            status: { in: activeStatuses as string[] }
+        };
+        if (campaignId) {
+            where.campaignId = campaignId;
+        }
 
         const leads = await prisma.lead.findMany({
-            where: {
-                status: {
-                    in: activeStatuses as string[]
-                }
-            },
+            where,
             orderBy: { updatedAt: 'desc' },
-            take: 1000, // Safety cap to prevent browser crash if there are 10k leads
+            take: 1000,
             select: {
                 id: true,
                 firstName: true,
@@ -39,7 +39,8 @@ export async function GET(req: Request) {
                 attempts: true,
                 priority: true,
                 updatedAt: true,
-                assignedToId: true // Minimal fields for card display
+                assignedToId: true,
+                campaignId: true
             }
         });
 

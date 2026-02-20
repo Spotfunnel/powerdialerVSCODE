@@ -8,12 +8,16 @@ export async function POST(req: Request) {
 
         const contentType = req.headers.get("content-type") || "";
 
+        let campaignId: string | null = null;
+
         if (contentType.includes("application/json")) {
             const body = await req.json();
             rows = body.rows || [];
+            campaignId = body.campaignId || null;
         } else {
             const formData = await req.formData();
             const file = formData.get("file") as File;
+            campaignId = (formData.get("campaignId") as string) || null;
 
             if (!file) {
                 return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
@@ -66,6 +70,7 @@ export async function POST(req: Request) {
                 state: colMap.state > -1 ? cols[colMap.state] : undefined,
                 status: LeadStatus.READY,
                 source: "IMPORT",
+                ...(campaignId ? { campaignId } : {}),
             });
         }
 
@@ -124,6 +129,7 @@ export async function POST(req: Request) {
                                 suburb: row.suburb || undefined,
                                 state: row.state || undefined,
                                 source: "IMPORT_MERGE",
+                                ...(campaignId ? { campaignId } : {}),
                                 updatedAt: new Date()
                             } as any
                         })
