@@ -13,28 +13,41 @@ export async function GET(req: Request) {
     const status = searchParams.get('status') || 'OPEN'; // 'OPEN' | 'CLOSED' | 'ALL'
 
     try {
-        const whereClause: any = {
-            OR: [
-                { assignedUserId: session.user.id },
-                { assignedUserId: null }
-            ]
-        };
+        const whereClause: any = {};
 
         if (status !== 'ALL') {
             whereClause.status = status;
         }
 
-        // Auto-archive logic: Move OPEN conversations with last message > 7 days ago to CLOSED
-        // This ensures the "Active" tab stays clean
+        // Recovery: Reopen conversations that were aggressively archived by old 7-day rule
+        // Any CLOSED conversation with activity in the last 30 days should be OPEN
+        if (status === 'OPEN') {
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            await prisma.conversation.updateMany({
+                where: {
+                    status: 'CLOSED',
+                    lastMessageAt: {
+                        gte: thirtyDaysAgo
+                    }
+                },
+                data: {
+                    status: 'OPEN'
+                }
+            });
+        }
+
+        // Auto-archive: Move OPEN conversations with no activity for 30+ days to CLOSED
         if (status === 'OPEN' || status === 'ALL') {
-            const sevenDaysAgo = new Date();
-            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
             await prisma.conversation.updateMany({
                 where: {
                     status: 'OPEN',
                     lastMessageAt: {
-                        lt: sevenDaysAgo
+                        lt: thirtyDaysAgo
                     }
                 },
                 data: {
