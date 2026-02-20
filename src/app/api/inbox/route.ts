@@ -100,7 +100,8 @@ export async function GET(req: Request) {
                 direction: c.messages[0]?.direction || 'OUTBOUND',
                 conversationId: c.id,
                 leadId: c.contactId || undefined,
-                unreadCount: c.unreadCount,
+                // If last message is outbound (user sent it), suppress unread badge
+                unreadCount: c.messages[0]?.direction === 'OUTBOUND' ? 0 : c.unreadCount,
                 avatarColor: avatarColors[hashId(c.id) % avatarColors.length],
             };
         });
