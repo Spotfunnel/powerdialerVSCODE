@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Building2, Loader2, Plus, Trash2, Users, Zap } from "lucide-react";
+import { Building2, Check, Loader2, Pencil, Plus, Trash2, Users, X, Zap } from "lucide-react";
 
 interface Campaign {
     id: string;
@@ -23,6 +23,11 @@ export default function AdminCampaignsPage() {
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<string | null>(null);
     const [seeding, setSeeding] = useState(false);
+
+    // Inline rename state
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editingName, setEditingName] = useState("");
+    const [renaming, setRenaming] = useState(false);
 
     useEffect(() => {
         if (status === "unauthenticated") router.push("/auth/signin");
@@ -68,6 +73,30 @@ export default function AdminCampaignsPage() {
         }
     };
 
+    const handleRename = async (id: string) => {
+        if (!editingName.trim() || renaming) return;
+        setRenaming(true);
+        try {
+            const res = await fetch("/api/campaigns", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, name: editingName.trim() })
+            });
+            if (res.ok) {
+                const updated = await res.json();
+                setCampaigns(prev =>
+                    prev.map(c => c.id === id ? { ...c, name: updated.name } : c)
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                );
+                setEditingId(null);
+            }
+        } catch (e) {
+            console.error("Failed to rename campaign", e);
+        } finally {
+            setRenaming(false);
+        }
+    };
+
     const handleDelete = async (id: string) => {
         if (!confirm("Delete this campaign? Leads will be unassigned but not deleted.")) return;
         setDeleting(id);
@@ -102,6 +131,16 @@ export default function AdminCampaignsPage() {
         }
         await fetchCampaigns();
         setSeeding(false);
+    };
+
+    const startEditing = (c: Campaign) => {
+        setEditingId(c.id);
+        setEditingName(c.name);
+    };
+
+    const cancelEditing = () => {
+        setEditingId(null);
+        setEditingName("");
     };
 
     if (status === "loading" || loading) {
@@ -169,18 +208,55 @@ export default function AdminCampaignsPage() {
                         {campaigns.length === 0 ? (
                             <div className="py-12 text-center text-slate-400">
                                 <Building2 className="h-8 w-8 mx-auto mb-3 opacity-50" />
-                                <p className="text-sm">No campaigns yet. Create one above or click "Seed Defaults".</p>
+                                <p className="text-sm">No campaigns yet. Create one above or click &quot;Seed Defaults&quot;.</p>
                             </div>
                         ) : (
                             <div className="divide-y divide-slate-100">
                                 {campaigns.map((c) => (
                                     <div key={c.id} className="flex items-center justify-between py-4 px-2 hover:bg-slate-50/50 rounded-lg transition-colors">
                                         <div className="flex items-center gap-4">
-                                            <div className="h-10 w-10 rounded-full bg-teal-50 border border-teal-200 flex items-center justify-center">
+                                            <div className="h-10 w-10 rounded-full bg-teal-50 border border-teal-200 flex items-center justify-center shrink-0">
                                                 <Building2 className="h-4 w-4 text-teal-600" />
                                             </div>
                                             <div>
-                                                <p className="font-bold text-slate-900">{c.name}</p>
+                                                {editingId === c.id ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={editingName}
+                                                            onChange={(e) => setEditingName(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === "Enter") handleRename(c.id);
+                                                                if (e.key === "Escape") cancelEditing();
+                                                            }}
+                                                            autoFocus
+                                                            className="h-8 px-3 rounded-md border border-teal-300 bg-white text-sm font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                                                        />
+                                                        <button
+                                                            onClick={() => handleRename(c.id)}
+                                                            disabled={renaming || !editingName.trim()}
+                                                            className="h-8 w-8 flex items-center justify-center rounded-md bg-teal-50 text-teal-600 hover:bg-teal-100 transition-colors disabled:opacity-50"
+                                                        >
+                                                            {renaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                                        </button>
+                                                        <button
+                                                            onClick={cancelEditing}
+                                                            className="h-8 w-8 flex items-center justify-center rounded-md bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                                                        >
+                                                            <X className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-2 group/name">
+                                                        <p className="font-bold text-slate-900">{c.name}</p>
+                                                        <button
+                                                            onClick={() => startEditing(c)}
+                                                            className="opacity-0 group-hover/name:opacity-100 h-6 w-6 flex items-center justify-center rounded text-slate-300 hover:text-teal-600 hover:bg-teal-50 transition-all"
+                                                        >
+                                                            <Pencil className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                )}
                                                 <p className="text-xs text-slate-400">
                                                     Created {new Date(c.createdAt).toLocaleDateString()}
                                                 </p>

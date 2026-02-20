@@ -31,6 +31,27 @@ export async function POST(req: Request) {
     }
 }
 
+export async function PATCH(req: Request) {
+    try {
+        const { id, name } = await req.json();
+        if (!id) {
+            return NextResponse.json({ error: "Campaign ID is required" }, { status: 400 });
+        }
+        if (!name || !name.trim()) {
+            return NextResponse.json({ error: "Campaign name is required" }, { status: 400 });
+        }
+        const campaign = await prisma.campaign.update({
+            where: { id },
+            data: { name: name.trim() },
+            include: { _count: { select: { leads: true } } }
+        });
+        return NextResponse.json(campaign);
+    } catch (error) {
+        console.error("Failed to rename campaign", error);
+        return NextResponse.json({ error: "Failed to rename campaign" }, { status: 500 });
+    }
+}
+
 export async function DELETE(req: Request) {
     try {
         const { searchParams } = new URL(req.url);
