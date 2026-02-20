@@ -13,7 +13,12 @@ export async function GET(req: Request) {
     const status = searchParams.get('status') || 'OPEN'; // 'OPEN' | 'CLOSED' | 'ALL'
 
     try {
-        const whereClause: any = {};
+        const whereClause: any = {
+            OR: [
+                { assignedUserId: (session.user as any).id },
+                { assignedUserId: null }
+            ]
+        };
 
         if (status !== 'ALL') {
             whereClause.status = status;
