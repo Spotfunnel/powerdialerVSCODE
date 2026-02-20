@@ -9,56 +9,20 @@ export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const userId = (session.user as any).id;
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status') || 'OPEN'; // 'OPEN' | 'CLOSED' | 'ALL'
 
     try {
         const whereClause: any = {
             OR: [
-                { assignedUserId: (session.user as any).id },
+                { assignedUserId: userId },
                 { assignedUserId: null }
             ]
         };
 
         if (status !== 'ALL') {
             whereClause.status = status;
-        }
-
-        // Recovery: Reopen conversations that were aggressively archived by old 7-day rule
-        // Any CLOSED conversation with activity in the last 30 days should be OPEN
-        if (status === 'OPEN') {
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-            await prisma.conversation.updateMany({
-                where: {
-                    status: 'CLOSED',
-                    lastMessageAt: {
-                        gte: thirtyDaysAgo
-                    }
-                },
-                data: {
-                    status: 'OPEN'
-                }
-            });
-        }
-
-        // Auto-archive: Move OPEN conversations with no activity for 30+ days to CLOSED
-        if (status === 'OPEN' || status === 'ALL') {
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-            await prisma.conversation.updateMany({
-                where: {
-                    status: 'OPEN',
-                    lastMessageAt: {
-                        lt: thirtyDaysAgo
-                    }
-                },
-                data: {
-                    status: 'CLOSED'
-                }
-            });
         }
 
         // Fetch conversations with contact details
@@ -96,7 +60,7 @@ export async function GET(req: Request) {
             }
         });
 
-        // Avatar color palette for consistent per-conversation coloring
+        // Avatar color palette — hash by conversation ID for stable colors
         const avatarColors = [
             "bg-teal-100 text-teal-700",
             "bg-blue-100 text-blue-700",
@@ -108,8 +72,17 @@ export async function GET(req: Request) {
             "bg-orange-100 text-orange-700",
         ];
 
+        const hashId = (id: string) => {
+            let hash = 0;
+            for (let i = 0; i < id.length; i++) {
+                hash = ((hash << 5) - hash) + id.charCodeAt(i);
+                hash |= 0;
+            }
+            return Math.abs(hash);
+        };
+
         // Format for UI
-        const formatted = conversations.map((c, i) => ({
+        const formatted = conversations.map((c) => ({
             id: c.id,
             contactName: c.contact ? `${c.contact.firstName || ''} ${c.contact.lastName || ''}`.trim() || c.contact.companyName : 'Unknown Contact',
             contactPhone: c.contactPhone,
@@ -120,7 +93,7 @@ export async function GET(req: Request) {
             status: c.status,
             assignedTo: c.assignedUser?.name || 'Unassigned',
             contactId: c.contactId,
-            avatarColor: avatarColors[i % avatarColors.length]
+            avatarColor: avatarColors[hashId(c.id) % avatarColors.length]
         }));
 
         return NextResponse.json(formatted);

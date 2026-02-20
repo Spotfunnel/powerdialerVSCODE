@@ -31,28 +31,25 @@ function MessagesContent() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [conversations, setConversations] = useState<any[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'OPEN' | 'CLOSED'>('OPEN');
 
     const fetchConversations = async (status: string = activeTab) => {
         setIsLoading(true);
         try {
             const res = await fetch(`/api/messaging/conversations?status=${status}`);
-            if (res.ok) {
-                const data = await res.json();
-                setConversations(data);
+            if (!res.ok) {
+                throw new Error(`Server returned ${res.status}`);
+            }
+            const data = await res.json();
+            setConversations(data);
 
-                // Auto-select based on content URL param
-                const leadIdParam = searchParams.get('leadId');
-                if (leadIdParam && status === 'OPEN') {
-                    const targetConv = data.find((c: any) => c.contactId === leadIdParam);
-                    if (targetConv) {
-                        setSelectedId(targetConv.id);
-                    } else {
-                        // Optional: Create new conversation or fetch specific lead details if not in list
-                        // For now, just logging
-                        console.log("Conversation not found for lead", leadIdParam);
-                    }
+            // Auto-select based on content URL param
+            const leadIdParam = searchParams.get('leadId');
+            if (leadIdParam && status === 'OPEN') {
+                const targetConv = data.find((c: any) => c.contactId === leadIdParam);
+                if (targetConv) {
+                    setSelectedId(targetConv.id);
                 }
             }
         } catch (e) {
@@ -69,14 +66,12 @@ function MessagesContent() {
 
     useEffect(() => {
         fetchConversations(activeTab);
-    }, [searchParams]); // Re-run if params change
+    }, [activeTab, searchParams]); // Re-run on tab change or param change
 
     const handleTabChange = (status: 'OPEN' | 'CLOSED') => {
         if (status === activeTab) return;
-        setActiveTab(status);
-        setConversations([]);
         setSelectedId(null);
-        fetchConversations(status);
+        setActiveTab(status); // triggers useEffect
     };
 
     const filteredConversations = conversations.filter(c =>
