@@ -58,10 +58,7 @@ export default function AdminNumbersPage() {
                 setUsers(data.users);
             }
 
-            // Also check standard logs table
-            const statsRes = await fetch("/api/admin/stats");
-            // Note: If no dedicated Evidence API, we'll use a specific one
-            const evidenceRes = await fetch("/api/admin/twilio/logs"); // We might need to create this or use a query
+            const evidenceRes = await fetch("/api/admin/twilio/logs");
             if (evidenceRes.ok) {
                 const evidenceData = await evidenceRes.json();
                 setLogs(evidenceData.logs || []);
