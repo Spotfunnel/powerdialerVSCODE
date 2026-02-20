@@ -148,7 +148,21 @@ export async function POST(req: Request) {
                 if (numberPoolItem?.owner?.repPhoneNumber) {
                     const repPhone = numberPoolItem.owner.repPhoneNumber;
                     const r = new Twilio.twiml.VoiceResponse();
-                    r.dial(repPhone);
+
+                    // Add whisper so the user knows it's from PowerDialer (not spam)
+                    const callerLabel = (lead.firstName + " " + lead.lastName).trim() || fromNumber;
+                    const companyLabel = lead.companyName || "";
+                    const whisperUrl = `/api/twilio/whisper?callerName=${encodeURIComponent(callerLabel)}&callerCompany=${encodeURIComponent(companyLabel)}`;
+
+                    const pstnDial = r.dial({
+                        action: '/api/twilio/inbound-status',
+                        method: 'POST',
+                        record: 'record-from-answer',
+                        recordingStatusCallback: '/api/twilio/recording',
+                        recordingStatusCallbackEvent: ['completed']
+                    });
+                    pstnDial.number({ url: whisperUrl }, repPhone);
+
                     const xml = r.toString();
 
                     await prismaDirect.twilioLog.update({
@@ -203,7 +217,22 @@ export async function POST(req: Request) {
                 }
             }
 
-            console.log(`[Inbound] DECISION: ${targetIdentity} | Reason: ${routingReason}`);
+            // 8. RESOLVE TARGET USER'S PSTN NUMBER FOR SIMULTANEOUS RING
+            let repPhoneNumber: string | null = null;
+            if (numberPoolItem?.owner?.repPhoneNumber) {
+                repPhoneNumber = numberPoolItem.owner.repPhoneNumber;
+            } else if (targetUserId) {
+                const targetUser = await prismaDirect.user.findUnique({
+                    where: { id: targetUserId },
+                    select: { repPhoneNumber: true }
+                });
+                repPhoneNumber = targetUser?.repPhoneNumber || null;
+            }
+
+            const callerLabel = (lead.firstName + " " + lead.lastName).trim() || "Unknown Lead";
+            const companyLabel = lead.companyName || "Unknown Company";
+
+            console.log(`[Inbound] DECISION: ${targetIdentity} | Reason: ${routingReason} | PSTN Sim-Ring: ${repPhoneNumber || 'NONE'}`);
 
             const response = new Twilio.twiml.VoiceResponse();
             const dial = response.dial({
@@ -213,16 +242,22 @@ export async function POST(req: Request) {
                 recordingStatusCallback: '/api/twilio/recording',
                 recordingStatusCallbackEvent: ['completed']
             });
-            const client = dial.client(targetIdentity);
 
-            client.parameter({
-                name: 'callerName',
-                value: (lead.firstName + " " + lead.lastName).trim() || "Unknown Lead"
-            });
-            client.parameter({
-                name: 'callerCompany',
-                value: lead.companyName || "Unknown Company"
-            });
+            // Ring browser via Twilio Device SDK
+            const client = dial.client(targetIdentity);
+            client.parameter({ name: 'callerName', value: callerLabel });
+            client.parameter({ name: 'callerCompany', value: companyLabel });
+
+            // Simultaneously ring the user's phone with whisper screening
+            // When they answer their phone, they hear:
+            //   "PowerDialer call from [Name], [Company]. Press 1 to accept."
+            // This lets them distinguish PowerDialer calls from spam/other businesses.
+            // Whichever leg (browser or phone) picks up first wins.
+            if (repPhoneNumber) {
+                const whisperUrl = `/api/twilio/whisper?callerName=${encodeURIComponent(callerLabel)}&callerCompany=${encodeURIComponent(companyLabel)}`;
+                dial.number({ url: whisperUrl }, repPhoneNumber);
+                routingReason += ` + SIMRING(${repPhoneNumber})`;
+            }
 
             const xml = response.toString();
 

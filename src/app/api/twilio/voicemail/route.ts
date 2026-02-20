@@ -6,10 +6,10 @@ export async function POST(req: Request) {
 
     response.say("Please leave a message after the beep.");
     response.record({
-        action: "/api/twilio/recording", // Webhook to handle the completed recording
         maxLength: 120,
         playBeep: true,
-        transcribe: true // Optional: if you want transcription
+        recordingStatusCallback: '/api/twilio/recording',
+        recordingStatusCallbackEvent: ['completed'],
     });
     response.hangup();
 

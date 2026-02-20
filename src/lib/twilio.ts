@@ -226,12 +226,13 @@ export async function sendSMS(
                 }
             });
         } else {
-            // Update lastMessageAt and ensure the conversation is OPEN
+            // Update lastMessageAt, reset unread count (user is engaging), and ensure OPEN
             conversation = await prisma.conversation.update({
                 where: { id: conversation.id },
                 data: {
                     lastMessageAt: new Date(),
                     status: "OPEN",
+                    unreadCount: 0,
                     // If no one is assigned yet, assign the sender
                     ...(!conversation.assignedUserId && userId ? { assignedUserId: userId } : {})
                 }

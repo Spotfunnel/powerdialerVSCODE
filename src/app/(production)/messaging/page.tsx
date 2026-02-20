@@ -335,7 +335,17 @@ function InboxContent() {
                             {filteredItems.map(item => (
                                 <button
                                     key={item.id}
-                                    onClick={() => { setSelectedItem(item); setComposeTarget(null); setComposing(false); }}
+                                    onClick={() => {
+                                        setSelectedItem(item);
+                                        setComposeTarget(null);
+                                        setComposing(false);
+                                        // Mark as read if SMS with unread count
+                                        if (item.type === 'sms' && item.conversationId && item.unreadCount && item.unreadCount > 0) {
+                                            fetch(`/api/conversations/${item.conversationId}/read`, { method: 'POST' }).catch(() => {});
+                                            // Clear badge locally
+                                            setItems(prev => prev.map(i => i.id === item.id ? { ...i, unreadCount: 0 } : i));
+                                        }
+                                    }}
                                     className={cn(
                                         "w-full p-3.5 flex gap-3 transition-all text-left group relative",
                                         selectedItem?.id === item.id ? "bg-zinc-50" : "hover:bg-zinc-50/50"

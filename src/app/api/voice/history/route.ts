@@ -32,8 +32,14 @@ export async function GET(req: Request) {
 
         const total = await prisma.call.count();
 
+        // Rewrite Twilio recording URLs to proxy endpoint (auth required)
+        const proxiedLogs = logs.map(log => ({
+            ...log,
+            recordingUrl: log.recordingUrl ? `/api/recordings/${log.id}` : null
+        }));
+
         return NextResponse.json({
-            logs,
+            logs: proxiedLogs,
             total,
             totalPages: Math.ceil(total / pageSize),
             currentPage: page

@@ -131,7 +131,7 @@ export async function GET(req: Request) {
                 timestamp: c.createdAt,
                 direction: c.direction,
                 duration: c.duration,
-                recordingUrl: c.recordingUrl || undefined,
+                recordingUrl: c.recordingUrl ? `/api/recordings/${c.id}` : undefined,
                 leadId: c.leadId,
                 unreadCount: undefined,
                 avatarColor: avatarColors[hashId(c.id) % avatarColors.length],
