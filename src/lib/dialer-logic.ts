@@ -260,6 +260,8 @@ export async function updateLeadDisposition(
     }
 
     // IF BOOKED -> Create Meeting + Google Sync + SMS Dispatch
+    let dispatchResult: { calendar?: string; sms?: string; smsError?: string; calendarError?: string } = {};
+
     if (status === 'BOOKED' && nextCallAt) {
         const tzMapping: Record<string, { iana: string, region: string }> = {
             '11': { iana: 'Australia/Sydney', region: 'Sydney, Australia' },
@@ -287,157 +289,132 @@ export async function updateLeadDisposition(
             }
         });
 
-        // 2. Trigger Google Sync (Non-blocking)
+        // 2. Google Sync + SMS Dispatch (awaited so errors surface to caller)
         let finalMessage = customMessage;
+
+        // Helper: resolve a valid "from" number for SMS
+        const resolveFromNumber = async (): Promise<string | undefined> => {
+            // Try recent call history first
+            const recentCall = await prisma.call.findFirst({
+                where: { leadId: lead.id, userId: userId },
+                orderBy: { createdAt: 'desc' },
+                select: { fromNumber: true }
+            });
+            if (recentCall?.fromNumber && recentCall.fromNumber !== 'UNKNOWN') {
+                return recentCall.fromNumber;
+            }
+            // Fallback: use the rotating number pool (same logic as outbound calls)
+            const rotatingNumber = await getRotatingNumber(userId);
+            if (rotatingNumber) {
+                console.log(`[DL] SMS from-number resolved via getRotatingNumber: ${rotatingNumber}`);
+                return rotatingNumber;
+            }
+            return undefined;
+        };
+
         if (deps.createGoogleMeeting) {
             const createMeeting = deps.createGoogleMeeting;
             const sendSms = deps.sendSMS;
             const clientName = lead.companyName || (lead.firstName ? `${lead.firstName} ${lead.lastName || ''}`.trim() : 'New Client');
             const eventTitle = meetingTitle || `Spotfunnel x ${clientName}`;
 
-            (async () => {
-                let googleEvent: any = null;
+            let googleEvent: any = null;
 
-                // Fetch User Tokens (Scope: Function-level, available for Calendar AND Gmail)
-                const calendarConnection = await prisma.calendarConnection.findUnique({
-                    where: { userId }
-                });
+            // Fetch User Tokens (Scope: Function-level, available for Calendar AND Gmail)
+            const calendarConnection = await prisma.calendarConnection.findUnique({
+                where: { userId }
+            });
 
-                const tokens = calendarConnection ? {
-                    accessToken: calendarConnection.accessToken,
-                    refreshToken: calendarConnection.refreshToken
-                } : undefined;
+            const tokens = calendarConnection ? {
+                accessToken: calendarConnection.accessToken,
+                refreshToken: calendarConnection.refreshToken
+            } : undefined;
 
-                if (calendarConnection) {
-                    console.log(`[DL] Using personal calendar connection for user ${userId}`);
-                } else {
-                    console.log(`[DL] No personal connection found for user ${userId}, falling back to system.`);
-                }
+            if (calendarConnection) {
+                console.log(`[DL] Using personal calendar connection for user ${userId}`);
+            } else {
+                console.log(`[DL] No personal connection found for user ${userId}, falling back to system.`);
+            }
 
-                try {
-                    // Log Dispatch Start
-                    await prisma.leadActivity.create({
-                        data: {
-                            leadId: lead.id,
-                            userId: userId,
-                            type: "SYSTEM",
-                            content: `Starting automated booking protocol dispatch for ${lead.companyName}...`
-                        }
-                    }).catch(e => console.error("[DL] Activity log fail:", e));
+            // --- Google Calendar Sync ---
+            try {
+                await prisma.leadActivity.create({
+                    data: {
+                        leadId: lead.id,
+                        userId: userId,
+                        type: "SYSTEM",
+                        content: `Starting automated booking protocol dispatch for ${lead.companyName}...`
+                    }
+                }).catch(e => console.error("[DL] Activity log fail:", e));
 
-                    googleEvent = await createMeeting({
-                        title: eventTitle,
-                        description: `${customMessage ? customMessage + '\n\n' : ''}---
+                googleEvent = await createMeeting({
+                    title: eventTitle,
+                    description: `${customMessage ? customMessage + '\n\n' : ''}---
 SpotFunnel Demo`,
-                        start: meeting.startAt,
-                        end: meeting.endAt,
-                        attendees: Array.from(new Set([
-                            ...(lead.email ? [lead.email.toLowerCase()] : []),
-                            ...(user?.email ? [user.email.toLowerCase()] : []),
-                            'leo@getspotfunnel.com'
-                        ])).map(email => ({ email })),
-                        repName: user?.name || 'SpotFunnel Specialist',
-                        timeZone: ianaTimeZone,
-                        location: regionLabel
-                    }, tokens);
+                    start: meeting.startAt,
+                    end: meeting.endAt,
+                    attendees: Array.from(new Set([
+                        ...(lead.email ? [lead.email.toLowerCase()] : []),
+                        ...(user?.email ? [user.email.toLowerCase()] : []),
+                        'leo@getspotfunnel.com'
+                    ])).map(email => ({ email })),
+                    repName: user?.name || 'SpotFunnel Specialist',
+                    timeZone: ianaTimeZone,
+                    location: regionLabel
+                }, tokens);
 
-                    if (googleEvent) {
-                        try {
-                            await prisma.meeting.update({
-                                where: { id: meeting.id },
-                                data: {
-                                    externalEventId: googleEvent.id,
-                                    meetingUrl: googleEvent.meetingUrl,
-                                    calendarUrl: googleEvent.calendarUrl,
-                                    provider: googleEvent.provider
-                                }
-                            });
-                        } catch (dbError) {
-                            console.error("[DL] Failed to update meeting in DB (schema mismatch?):", dbError);
-                        }
-                    }
-                } catch (syncError) {
-                    console.error("[DL] Background Google Sync Failed", syncError);
-                    await prisma.leadActivity.create({
-                        data: {
-                            leadId: lead.id,
-                            userId: userId,
-                            type: "SYSTEM",
-                            content: `Google Calendar Sync Failed: ${syncError instanceof Error ? syncError.message : String(syncError)}`
-                        }
-                    }).catch(e => console.error("[DL] Activity log fail:", e));
-                }
-
-                try {
-                    if (sendSms && lead.phoneNumber) {
-                        let smsBody = finalMessage || `Hi ${lead.firstName}, confirming our demo!`;
-
-                        if (includeMeetLink && googleEvent?.meetingUrl) {
-                            if (smsBody.includes('[LINK]')) {
-                                smsBody = smsBody.replace('[LINK]', googleEvent.meetingUrl);
-                            } else {
-                                smsBody = `${smsBody} ${googleEvent.meetingUrl}`;
-                            }
-                        }
-
-                        if (includeCalendarLink && googleEvent?.calendarUrl) {
-                            if (smsBody.includes('[CAL_LINK]')) {
-                                smsBody = smsBody.replace('[CAL_LINK]', googleEvent.calendarUrl);
-                            } else {
-                                smsBody = `${smsBody} ${googleEvent.calendarUrl}`;
-                            }
-                        }
-
-                        const recentCall = await prisma.call.findFirst({
-                            where: { leadId: lead.id, userId: userId },
-                            orderBy: { createdAt: 'desc' },
-                            select: { fromNumber: true }
-                        });
-
-                        const actualFrom = recentCall?.fromNumber && recentCall.fromNumber !== 'UNKNOWN' ? recentCall.fromNumber : undefined;
-
-                        await sendSms({
-                            to: lead.phoneNumber,
-                            body: smsBody,
-                            leadId: lead.id,
-                            userId: userId,
-                            from: actualFrom
-                        });
-
-                        await prisma.leadActivity.create({
+                if (googleEvent) {
+                    try {
+                        await prisma.meeting.update({
+                            where: { id: meeting.id },
                             data: {
-                                leadId: lead.id,
-                                userId: userId,
-                                type: "SYSTEM",
-                                content: `Automated booking SMS dispatched from ${actualFrom || 'smart-rotation'}.`
+                                externalEventId: googleEvent.id,
+                                meetingUrl: googleEvent.meetingUrl,
+                                calendarUrl: googleEvent.calendarUrl,
+                                provider: googleEvent.provider
                             }
-                        }).catch(e => console.error("[DL] Activity log fail:", e));
+                        });
+                    } catch (dbError) {
+                        console.error("[DL] Failed to update meeting in DB (schema mismatch?):", dbError);
                     }
-                } catch (smsError) {
-                    console.error("[DL] Background SMS Failed", smsError);
-                    await prisma.leadActivity.create({
-                        data: {
-                            leadId: lead.id,
-                            userId: userId,
-                            type: "SYSTEM",
-                            content: `Automated booking SMS dispatch failed: ${smsError instanceof Error ? smsError.message : String(smsError)}`
-                        }
-                    }).catch(e => console.error("[DL] Activity log fail:", e));
                 }
+                dispatchResult.calendar = 'sent';
+            } catch (syncError) {
+                console.error("[DL] Google Sync Failed", syncError);
+                dispatchResult.calendar = 'failed';
+                dispatchResult.calendarError = syncError instanceof Error ? syncError.message : String(syncError);
+                await prisma.leadActivity.create({
+                    data: {
+                        leadId: lead.id,
+                        userId: userId,
+                        type: "SYSTEM",
+                        content: `Google Calendar Sync Failed: ${dispatchResult.calendarError}`
+                    }
+                }).catch(e => console.error("[DL] Activity log fail:", e));
+            }
 
-            })();
-        } else if (deps.sendSMS && lead.phoneNumber) {
-            // Fallback: Just SMS if no meeting logic
-            const sendSms = deps.sendSMS;
-            (async () => {
-                try {
-                    const smsBody = finalMessage || `Hi ${lead.firstName}, confirming our demo!`;
-                    const recentCall = await prisma.call.findFirst({
-                        where: { leadId: lead.id, userId: userId },
-                        orderBy: { createdAt: 'desc' },
-                        select: { fromNumber: true }
-                    });
-                    const actualFrom = recentCall?.fromNumber && recentCall.fromNumber !== 'UNKNOWN' ? recentCall.fromNumber : undefined;
+            // --- SMS Dispatch ---
+            try {
+                if (sendSms && lead.phoneNumber) {
+                    let smsBody = finalMessage || `Hi ${lead.firstName}, confirming our demo!`;
+
+                    if (includeMeetLink && googleEvent?.meetingUrl) {
+                        if (smsBody.includes('[LINK]')) {
+                            smsBody = smsBody.replace('[LINK]', googleEvent.meetingUrl);
+                        } else {
+                            smsBody = `${smsBody} ${googleEvent.meetingUrl}`;
+                        }
+                    }
+
+                    if (includeCalendarLink && googleEvent?.calendarUrl) {
+                        if (smsBody.includes('[CAL_LINK]')) {
+                            smsBody = smsBody.replace('[CAL_LINK]', googleEvent.calendarUrl);
+                        } else {
+                            smsBody = `${smsBody} ${googleEvent.calendarUrl}`;
+                        }
+                    }
+
+                    const actualFrom = await resolveFromNumber();
 
                     await sendSms({
                         to: lead.phoneNumber,
@@ -446,12 +423,53 @@ SpotFunnel Demo`,
                         userId: userId,
                         from: actualFrom
                     });
-                } catch (smsError) {
-                    console.error("[DL] Background SMS Failed", smsError);
+
+                    dispatchResult.sms = 'sent';
+                    await prisma.leadActivity.create({
+                        data: {
+                            leadId: lead.id,
+                            userId: userId,
+                            type: "SYSTEM",
+                            content: `Automated booking SMS dispatched from ${actualFrom || 'smart-rotation'}.`
+                        }
+                    }).catch(e => console.error("[DL] Activity log fail:", e));
                 }
-            })();
+            } catch (smsError) {
+                console.error("[DL] SMS Failed", smsError);
+                dispatchResult.sms = 'failed';
+                dispatchResult.smsError = smsError instanceof Error ? smsError.message : String(smsError);
+                await prisma.leadActivity.create({
+                    data: {
+                        leadId: lead.id,
+                        userId: userId,
+                        type: "SYSTEM",
+                        content: `Automated booking SMS dispatch failed: ${dispatchResult.smsError}`
+                    }
+                }).catch(e => console.error("[DL] Activity log fail:", e));
+            }
+
+        } else if (deps.sendSMS && lead.phoneNumber) {
+            // Fallback: Just SMS if no meeting logic
+            const sendSms = deps.sendSMS;
+            try {
+                const smsBody = finalMessage || `Hi ${lead.firstName}, confirming our demo!`;
+                const actualFrom = await resolveFromNumber();
+
+                await sendSms({
+                    to: lead.phoneNumber,
+                    body: smsBody,
+                    leadId: lead.id,
+                    userId: userId,
+                    from: actualFrom
+                });
+                dispatchResult.sms = 'sent';
+            } catch (smsError) {
+                console.error("[DL] SMS Failed", smsError);
+                dispatchResult.sms = 'failed';
+                dispatchResult.smsError = smsError instanceof Error ? smsError.message : String(smsError);
+            }
         }
     }
 
-    return { lead, success: true };
+    return { lead, success: true, dispatch: dispatchResult };
 }

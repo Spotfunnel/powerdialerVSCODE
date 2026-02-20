@@ -73,7 +73,7 @@ export async function POST(req: Request) {
         // We set status to 'BOOKED'
         // We pass 'nextCallAt' as the START time of the meeting
 
-        await updateLeadDisposition(
+        const result = await updateLeadDisposition(
             lead.id,
             userId,
             {
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
             }
         );
 
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: true, dispatch: result.dispatch });
 
     } catch (error: any) {
         console.error("Booking Error:", error);
