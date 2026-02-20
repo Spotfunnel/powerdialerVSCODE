@@ -8,14 +8,13 @@ import {
     Users,
     Calendar,
     Trophy,
-    Mic2,
+    Inbox,
     Clock,
     Settings,
     LogOut,
     Menu,
     X,
     ScrollText,
-    MessageSquare,
     User
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,8 +23,7 @@ import { signOut } from "next-auth/react";
 
 const NAV_ITEMS = [
     { label: "Dialer", href: "/dialer", icon: Phone },
-    { label: "Messaging", href: "/messaging", icon: MessageSquare },
-    { label: "Inbound", href: "/inbound", icon: Mic2 },
+    { label: "Inbox", href: "/messaging", icon: Inbox },
     { label: "Callbacks", href: "/callbacks", icon: Clock },
     { label: "History", href: "/history", icon: ScrollText },
     { label: "Pipeline", href: "/pipeline", icon: Layout },

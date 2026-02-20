@@ -4,19 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
     Phone,
-    MessageSquare,
+    Inbox,
     Users,
     Trophy,
-    Mic2,
     History
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
     { label: "Contacts", href: "/contacts", icon: Users },
-    { label: "Inbound", href: "/inbound", icon: Mic2 },
+    { label: "Inbox", href: "/messaging", icon: Inbox },
     { label: "Dialer", href: "/dialer", icon: Phone },
-    { label: "Messages", href: "/messaging", icon: MessageSquare },
     { label: "History", href: "/history", icon: History },
 ];
 
