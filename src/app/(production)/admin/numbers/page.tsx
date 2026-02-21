@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, User, Users, Grip, Phone, RefreshCw, ShieldCheck, ShieldAlert, Activity, FileSearch } from "lucide-react";
+import { Loader2, User, Users, Grip, Phone, PhoneCall, RefreshCw, ShieldCheck, ShieldAlert, Activity, FileSearch, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { fixNumberRouting } from "@/app/actions/twilio";
 
 interface NumberPoolItem {
@@ -334,6 +334,11 @@ export default function AdminNumbersPage() {
                 </Card>
             </div>
 
+            {/* SPAM TEST TOOL */}
+            <div className="max-w-7xl mx-auto mt-8">
+                <SpamTestTool numbers={numbers} />
+            </div>
+
             {/* TRIPLE CHECK TOOL */}
             <div className="max-w-7xl mx-auto mt-8">
                 <TripleCheckTool defaultNumber="+61489088403" baseUrl={auditData?.meta?.baseUrl} />
@@ -344,6 +349,185 @@ export default function AdminNumbersPage() {
                 <RoutingSimulator />
             </div>
         </div>
+    );
+}
+
+function SpamTestTool({ numbers }: { numbers: NumberPoolItem[] }) {
+    const [testTarget, setTestTarget] = useState("+61478737917");
+    const [testResults, setTestResults] = useState<Record<string, { status: string; callSid?: string; error?: string }>>({});
+    const [testRunning, setTestRunning] = useState(false);
+    const [currentNumber, setCurrentNumber] = useState<string | null>(null);
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    const pollCallStatus = async (callSid: string): Promise<string> => {
+        const terminalStatuses = ["completed", "failed", "busy", "no-answer", "canceled"];
+        for (let i = 0; i < 30; i++) { // max 60s polling
+            await sleep(2000);
+            try {
+                const res = await fetch(`/api/admin/twilio/spam-test?callSid=${callSid}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (terminalStatuses.includes(data.status)) return data.status;
+                }
+            } catch {
+                // continue polling
+            }
+        }
+        return "timeout";
+    };
+
+    const testSingleNumber = async (phoneNumber: string) => {
+        setCurrentNumber(phoneNumber);
+        setTestResults(prev => ({ ...prev, [phoneNumber]: { status: "calling" } }));
+
+        try {
+            const res = await fetch("/api/admin/twilio/spam-test", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fromNumber: phoneNumber, toNumber: testTarget })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                setTestResults(prev => ({ ...prev, [phoneNumber]: { status: "error", error: err.error } }));
+                return;
+            }
+
+            const { callSid } = await res.json();
+            setTestResults(prev => ({ ...prev, [phoneNumber]: { status: "ringing", callSid } }));
+
+            const finalStatus = await pollCallStatus(callSid);
+            setTestResults(prev => ({ ...prev, [phoneNumber]: { status: finalStatus, callSid } }));
+        } catch (e: any) {
+            setTestResults(prev => ({ ...prev, [phoneNumber]: { status: "error", error: e.message } }));
+        }
+
+        setCurrentNumber(null);
+    };
+
+    const testAllNumbers = async () => {
+        setTestRunning(true);
+        setTestResults({});
+        const activeNumbers = numbers.filter(n => n.isActive);
+
+        for (const num of activeNumbers) {
+            await testSingleNumber(num.phoneNumber);
+            // Wait 5 seconds between calls
+            if (num !== activeNumbers[activeNumbers.length - 1]) {
+                await sleep(5000);
+            }
+        }
+        setTestRunning(false);
+    };
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case "calling":
+            case "ringing":
+            case "in-progress":
+            case "queued":
+                return <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1"><Loader2 className="h-3 w-3 animate-spin" />{status}</Badge>;
+            case "completed":
+                return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 gap-1"><CheckCircle2 className="h-3 w-3" />Completed</Badge>;
+            case "failed":
+            case "busy":
+            case "no-answer":
+            case "canceled":
+            case "timeout":
+            case "error":
+                return <Badge className="bg-red-100 text-red-700 border-red-200 gap-1"><XCircle className="h-3 w-3" />{status}</Badge>;
+            default:
+                return <Badge variant="secondary">{status}</Badge>;
+        }
+    };
+
+    return (
+        <Card className="bg-white border-slate-200 shadow-sm border-l-4 border-l-amber-500">
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-amber-600" />
+                    Spam Test Calls
+                </CardTitle>
+                <CardDescription>
+                    Call your mobile from each pool number to check which ones are flagged as spam. Calls play a short message and hang up.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="flex items-end gap-4 mb-6">
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase text-slate-500">Target Mobile Number</label>
+                        <input
+                            className="flex h-10 w-[300px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                            value={testTarget}
+                            onChange={(e) => setTestTarget(e.target.value)}
+                            placeholder="+61478737917"
+                            disabled={testRunning}
+                        />
+                    </div>
+                    <Button
+                        onClick={testAllNumbers}
+                        disabled={testRunning || !testTarget || numbers.filter(n => n.isActive).length === 0}
+                        className="bg-amber-600 hover:bg-amber-700 text-white"
+                    >
+                        {testRunning ? (
+                            <><Loader2 className="h-4 w-4 animate-spin mr-2" />Testing...</>
+                        ) : (
+                            <><PhoneCall className="h-4 w-4 mr-2" />Test All Numbers</>
+                        )}
+                    </Button>
+                </div>
+
+                {numbers.filter(n => n.isActive).length > 0 && (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                                <tr>
+                                    <th className="px-4 py-3">Pool Number</th>
+                                    <th className="px-4 py-3">Status</th>
+                                    <th className="px-4 py-3">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {numbers.filter(n => n.isActive).map((num) => {
+                                    const result = testResults[num.phoneNumber];
+                                    return (
+                                        <tr key={num.id} className={currentNumber === num.phoneNumber ? "bg-amber-50/50" : "hover:bg-slate-50/50"}>
+                                            <td className="px-4 py-3 font-mono font-medium">{num.phoneNumber}</td>
+                                            <td className="px-4 py-3">
+                                                {result ? (
+                                                    <div className="flex flex-col gap-1">
+                                                        {getStatusBadge(result.status)}
+                                                        {result.error && <span className="text-[10px] text-red-500">{result.error}</span>}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-xs text-slate-400">Not tested</span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => testSingleNumber(num.phoneNumber)}
+                                                    disabled={testRunning || currentNumber === num.phoneNumber}
+                                                    className="h-7 text-xs"
+                                                >
+                                                    {currentNumber === num.phoneNumber ? (
+                                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                                    ) : (
+                                                        <><Phone className="h-3 w-3 mr-1" />Test</>
+                                                    )}
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
     );
 }
 
