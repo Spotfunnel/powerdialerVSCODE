@@ -33,6 +33,7 @@ export function MessageThread({ conversationId, leadId, participantName, onMessa
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [inputValue, setInputValue] = useState("");
+    const [fetchError, setFetchError] = useState<string | null>(null);
 
     const [availableNumbers, setAvailableNumbers] = useState<TwilioNumber[]>([]);
     const [selectedNumber, setSelectedNumber] = useState<string>("");
@@ -48,6 +49,7 @@ export function MessageThread({ conversationId, leadId, participantName, onMessa
     const fetchMessages = async () => {
         if (!conversationId && !leadId) return;
         setLoading(true);
+        setFetchError(null);
         try {
             const params = new URLSearchParams();
             if (conversationId) params.append("conversationId", conversationId);
@@ -57,9 +59,14 @@ export function MessageThread({ conversationId, leadId, participantName, onMessa
             if (res.ok) {
                 const data = await res.json();
                 setMessages(data);
+            } else {
+                const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+                console.error("Messages fetch failed:", res.status, err);
+                setFetchError(err.error || `Failed to load messages (${res.status})`);
             }
         } catch (e) {
             console.error(e);
+            setFetchError("Network error loading messages");
         } finally {
             setLoading(false);
         }
@@ -193,7 +200,13 @@ export function MessageThread({ conversationId, leadId, participantName, onMessa
                     </div>
                 )}
 
-                {messages.length === 0 && !loading && (
+                {fetchError && !loading && (
+                    <div className="text-center py-10 text-red-400 text-sm">
+                        {fetchError}
+                    </div>
+                )}
+
+                {messages.length === 0 && !loading && !fetchError && (
                     <div className="text-center py-10 text-slate-400 text-sm">
                         No messages yet. Start the conversation!
                     </div>

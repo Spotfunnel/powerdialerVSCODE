@@ -36,14 +36,17 @@ export async function GET(req: Request) {
             targetConversationId = conv.id;
         }
 
-        // OWNERSHIP CHECK
-        const conversationSnippet = await prisma.conversation.findUnique({
-            where: { id: targetConversationId! },
-            select: { assignedUserId: true }
-        });
+        // OWNERSHIP CHECK (admins can view all conversations)
+        const isAdmin = (session.user as any).role === 'ADMIN';
+        if (!isAdmin) {
+            const conversationSnippet = await prisma.conversation.findUnique({
+                where: { id: targetConversationId! },
+                select: { assignedUserId: true }
+            });
 
-        if (conversationSnippet && conversationSnippet.assignedUserId && conversationSnippet.assignedUserId !== session.user.id) {
-            return NextResponse.json({ error: "Access Denied" }, { status: 403 });
+            if (conversationSnippet && conversationSnippet.assignedUserId && conversationSnippet.assignedUserId !== session.user.id) {
+                return NextResponse.json({ error: "Access Denied" }, { status: 403 });
+            }
         }
 
         const messages = await prisma.message.findMany({
