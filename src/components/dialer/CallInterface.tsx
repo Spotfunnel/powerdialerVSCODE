@@ -468,6 +468,11 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                         <h2 className="text-base sm:text-lg font-bold truncate text-zinc-900 max-w-[90vw] sm:max-w-none">
                             {currentLead?.companyName || "Unknown Company"}
                         </h2>
+                        {currentLead?.industry && (
+                            <p className="text-[10px] sm:text-xs font-semibold text-teal-700 truncate max-w-[90vw] sm:max-w-none">
+                                {currentLead.industry}
+                            </p>
+                        )}
                         <div className="flex items-center gap-2 text-[10px] sm:text-[14px] text-zinc-500">
                             <span className="truncate">
                                 {currentLead?.firstName} {currentLead?.lastName}
