@@ -17,6 +17,19 @@ interface NumberPoolItem {
     owner?: { id: string; name: string; email: string };
     lastUsedAt?: string;
     dailyCount: number;
+    hourlyCount?: number;
+    hourlyLimit?: number;
+    dailyLimit?: number;
+    cooldownRemaining?: number | null;
+    isResting?: boolean;
+}
+
+interface PoolHealth {
+    activeCount: number;
+    restingCount: number;
+    totalCount: number;
+    hourlyLimit: number;
+    dailyLimit: number;
 }
 
 interface UserItem {
@@ -30,11 +43,14 @@ export default function AdminNumbersPage() {
     const router = useRouter();
     const [numbers, setNumbers] = useState<NumberPoolItem[]>([]);
     const [users, setUsers] = useState<UserItem[]>([]);
+    const [poolHealth, setPoolHealth] = useState<PoolHealth | null>(null);
     const [loading, setLoading] = useState(true);
     const [updating, setUpdating] = useState<string | null>(null);
     const [auditData, setAuditData] = useState<any>(null);
     const [auditLoading, setAuditLoading] = useState(false);
     const [logs, setLogs] = useState<any[]>([]);
+    const [rotationSettings, setRotationSettings] = useState({ hourlyNumberCap: 10, numberCooldownMin: 120, dailyNumberCap: 50, useGlobalPool: false });
+    const [savingSettings, setSavingSettings] = useState(false);
 
     useEffect(() => {
         if (status === "unauthenticated") {
@@ -56,6 +72,8 @@ export default function AdminNumbersPage() {
                 const data = await numRes.json();
                 setNumbers(data.numbers);
                 setUsers(data.users);
+                if (data.health) setPoolHealth(data.health);
+                if (data.rotationSettings) setRotationSettings(data.rotationSettings);
             }
 
             const evidenceRes = await fetch("/api/admin/twilio/logs");
@@ -104,6 +122,22 @@ export default function AdminNumbersPage() {
         }
     };
 
+    const handleCooldown = async (numberId: string, action: 'force' | 'release') => {
+        setUpdating(numberId);
+        try {
+            const res = await fetch("/api/admin/numbers", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: numberId, cooldownAction: action })
+            });
+            if (res.ok) fetchData();
+        } catch (e) {
+            alert("Failed to update cooldown");
+        } finally {
+            setUpdating(null);
+        }
+    };
+
     const handleAssign = async (numberId: string, userId: string) => {
         setUpdating(numberId);
         try {
@@ -135,7 +169,7 @@ export default function AdminNumbersPage() {
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-3xl font-black tracking-tighter text-slate-900 mb-2">Number Management</h1>
-                        <p className="text-slate-500">Assign Twilio numbers to specific users for ownership routing.</p>
+                        <p className="text-slate-500">Smart rotation with auto-cooldown to prevent carrier spam flagging.</p>
                     </div>
                     <div className="flex gap-2">
                         <Button variant="outline" onClick={fetchData}>
@@ -147,14 +181,109 @@ export default function AdminNumbersPage() {
                     </div>
                 </div>
 
+                {/* Pool Health Summary */}
+                {poolHealth && (
+                    <div className="grid grid-cols-4 gap-4">
+                        <Card className="bg-white border-slate-200">
+                            <CardContent className="pt-5 pb-4">
+                                <div className="text-xs font-bold uppercase text-slate-500 mb-1">Pool Size</div>
+                                <div className="text-2xl font-black">{poolHealth.totalCount}</div>
+                            </CardContent>
+                        </Card>
+                        <Card className="bg-white border-slate-200">
+                            <CardContent className="pt-5 pb-4">
+                                <div className="text-xs font-bold uppercase text-slate-500 mb-1">Available</div>
+                                <div className="text-2xl font-black text-emerald-600">{poolHealth.activeCount}</div>
+                            </CardContent>
+                        </Card>
+                        <Card className="bg-white border-slate-200">
+                            <CardContent className="pt-5 pb-4">
+                                <div className="text-xs font-bold uppercase text-slate-500 mb-1">Resting</div>
+                                <div className="text-2xl font-black text-amber-600">{poolHealth.restingCount}</div>
+                            </CardContent>
+                        </Card>
+                        <Card className="bg-white border-slate-200">
+                            <CardContent className="pt-5 pb-4">
+                                <div className="text-xs font-bold uppercase text-slate-500 mb-1">Pool Health</div>
+                                <div className={`text-2xl font-black ${
+                                    poolHealth.activeCount / poolHealth.totalCount > 0.5 ? 'text-emerald-600' :
+                                    poolHealth.activeCount / poolHealth.totalCount > 0.25 ? 'text-amber-600' : 'text-red-600'
+                                }`}>
+                                    {poolHealth.totalCount > 0 ? Math.round((poolHealth.activeCount / poolHealth.totalCount) * 100) : 0}%
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
+
+                {/* Rotation Settings */}
+                <Card className="bg-white border-slate-200 shadow-sm">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="flex items-center gap-2 text-base">
+                            <RefreshCw className="h-4 w-4 text-indigo-600" />
+                            Rotation Settings
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex items-end gap-6">
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-slate-500">Max Calls/Hour/Number</label>
+                                <input type="number" min={1} max={50} className="flex h-9 w-24 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm" value={rotationSettings.hourlyNumberCap} onChange={e => setRotationSettings(s => ({ ...s, hourlyNumberCap: parseInt(e.target.value) || 5 }))} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-slate-500">Cooldown (minutes)</label>
+                                <input type="number" min={5} max={480} className="flex h-9 w-24 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm" value={rotationSettings.numberCooldownMin} onChange={e => setRotationSettings(s => ({ ...s, numberCooldownMin: parseInt(e.target.value) || 60 }))} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold uppercase text-slate-500">Max Calls/Day/Number</label>
+                                <input type="number" min={1} max={500} className="flex h-9 w-24 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm" value={rotationSettings.dailyNumberCap} onChange={e => setRotationSettings(s => ({ ...s, dailyNumberCap: parseInt(e.target.value) || 50 }))} />
+                            </div>
+                            <div className="space-y-1 border-l border-slate-200 pl-6 ml-2">
+                                <label className="text-xs font-bold uppercase text-slate-500">Global Pool</label>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={rotationSettings.useGlobalPool}
+                                        onClick={() => setRotationSettings(s => ({ ...s, useGlobalPool: !s.useGlobalPool }))}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                            rotationSettings.useGlobalPool ? 'bg-teal-600' : 'bg-slate-300'
+                                        }`}
+                                    >
+                                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                            rotationSettings.useGlobalPool ? 'translate-x-6' : 'translate-x-1'
+                                        }`} />
+                                    </button>
+                                    <span className="text-xs text-slate-500 max-w-[160px]">
+                                        {rotationSettings.useGlobalPool ? "All numbers shared" : "Owner-first routing"}
+                                    </span>
+                                </div>
+                            </div>
+                            <Button size="sm" disabled={savingSettings} onClick={async () => {
+                                setSavingSettings(true);
+                                try {
+                                    await fetch("/api/admin/numbers", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ action: 'updateSettings', ...rotationSettings })
+                                    });
+                                    fetchData();
+                                } finally { setSavingSettings(false); }
+                            }}>
+                                {savingSettings ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
                 <Card className="bg-white border-slate-200 shadow-sm">
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                             <Phone className="h-5 w-5 text-teal-600" />
-                            Active Number Pool
+                            Number Pool — Rotation & Health
                         </CardTitle>
                         <CardDescription>
-                            Inbound calls to these numbers will route to the Owner first.
+                            Numbers auto-rotate and rest after {poolHealth?.hourlyLimit || 5} calls/hour. Resting numbers are skipped.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -163,15 +292,20 @@ export default function AdminNumbersPage() {
                                 <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
                                     <tr>
                                         <th className="px-4 py-3">Phone Number</th>
-                                        <th className="px-4 py-3">Assigned Owner</th>
+                                        <th className="px-4 py-3">Owner</th>
                                         <th className="px-4 py-3">Status</th>
-                                        <th className="px-4 py-3">Daily Usage</th>
+                                        <th className="px-4 py-3">Hourly</th>
+                                        <th className="px-4 py-3">Daily</th>
                                         <th className="px-4 py-3">Last Used</th>
+                                        <th className="px-4 py-3">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {numbers.map((num) => (
-                                        <tr key={num.id} className="hover:bg-slate-50/50">
+                                    {numbers.map((num) => {
+                                        const hourlyPct = num.hourlyLimit ? (num.hourlyCount || 0) / num.hourlyLimit : 0;
+                                        const dailyPct = num.dailyLimit ? num.dailyCount / num.dailyLimit : 0;
+                                        return (
+                                        <tr key={num.id} className={`hover:bg-slate-50/50 ${num.isResting ? 'bg-amber-50/30' : ''}`}>
                                             <td className="px-4 py-3 font-mono font-medium">{num.phoneNumber}</td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-2">
@@ -182,27 +316,63 @@ export default function AdminNumbersPage() {
                                                         onChange={(e) => handleAssign(num.id, e.target.value)}
                                                         disabled={updating === num.id}
                                                     >
-                                                        <option value="unassigned">-- Unassigned --</option>
+                                                        <option value="unassigned">-- Shared --</option>
                                                         {users.map(u => (
-                                                            <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                                                            <option key={u.id} value={u.id}>{u.name}</option>
                                                         ))}
                                                     </select>
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3">
-                                                <Badge variant={num.isActive ? "default" : "secondary"} className={num.isActive ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : ""}>
-                                                    {num.isActive ? "Active" : "Inactive"}
-                                                </Badge>
+                                                {num.isResting ? (
+                                                    <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+                                                        Resting ({num.cooldownRemaining}m)
+                                                    </Badge>
+                                                ) : !num.isActive ? (
+                                                    <Badge variant="secondary">Inactive</Badge>
+                                                ) : (
+                                                    <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Active</Badge>
+                                                )}
                                             </td>
-                                            <td className="px-4 py-3">{num.dailyCount} calls</td>
-                                            <td className="px-4 py-3 text-slate-400">
-                                                {num.lastUsedAt ? new Date(num.lastUsedAt).toLocaleString() : "Never"}
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div className={`h-full rounded-full ${hourlyPct >= 1 ? 'bg-red-500' : hourlyPct >= 0.6 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(hourlyPct * 100, 100)}%` }} />
+                                                    </div>
+                                                    <span className="text-xs text-slate-500">{num.hourlyCount || 0}/{num.hourlyLimit || 5}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div className={`h-full rounded-full ${dailyPct >= 1 ? 'bg-red-500' : dailyPct >= 0.6 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(dailyPct * 100, 100)}%` }} />
+                                                    </div>
+                                                    <span className="text-xs text-slate-500">{num.dailyCount}/{num.dailyLimit || 100}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-slate-400">
+                                                {num.lastUsedAt ? (() => {
+                                                    const mins = Math.round((Date.now() - new Date(num.lastUsedAt).getTime()) / 60000);
+                                                    return mins < 1 ? 'Just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+                                                })() : "Never"}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {num.isResting ? (
+                                                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleCooldown(num.id, 'release')} disabled={updating === num.id}>
+                                                        Wake Up
+                                                    </Button>
+                                                ) : num.isActive ? (
+                                                    <Button variant="outline" size="sm" className="h-7 text-xs text-amber-600 border-amber-200 hover:bg-amber-50" onClick={() => handleCooldown(num.id, 'force')} disabled={updating === num.id}>
+                                                        Rest
+                                                    </Button>
+                                                ) : null}
                                             </td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                     {numbers.length === 0 && (
                                         <tr>
-                                            <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                                            <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                                                 No numbers found in pool. Run "Auto-Configure" in Admin &gt; Twilio Settings.
                                             </td>
                                         </tr>

@@ -112,6 +112,8 @@ model Call {
   userId       String
   lead         Lead     @relation(fields: [leadId], references: [id])
   user         User     @relation(fields: [userId], references: [id])
+
+  @@index([fromNumber, createdAt])
 }
 
 model Callback {
@@ -190,13 +192,15 @@ model Settings {
   twilioAppSid        String?
   webhookBaseUrl      String?
   maxAttempts         Int      @default(5)
-  dailyNumberCap      Int      @default(100)
+  dailyNumberCap      Int      @default(50)
   setupCompleted      Boolean  @default(false)
   updatedAt           DateTime @updatedAt
-  numberCooldownMin   Int      @default(60)
+  numberCooldownMin   Int      @default(120)
   twilioFromNumbers   String?
   twilioApiKey        String?
   twilioApiSecret     String?
+  hourlyNumberCap     Int      @default(10)
+  useGlobalPool       Boolean  @default(false)
 }
 
 model Message {

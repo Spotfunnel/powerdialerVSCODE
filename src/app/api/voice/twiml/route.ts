@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Twilio from 'twilio';
 import { prisma } from '@/lib/prisma';
+import { selectOutboundNumber } from '@/lib/number-rotation';
 
 // This is the webhook Twilio calls when the browser makes a call
 export async function POST(req: Request) {
@@ -11,49 +12,25 @@ export async function POST(req: Request) {
 
         const response = new Twilio.twiml.VoiceResponse();
 
-        // 1. Get Settings and Pool in Parallel
-        const [settings, pool] = await Promise.all([
-            prisma.settings.findUnique({ where: { id: 'singleton' } }),
-            prisma.numberPool.findMany({ where: { isActive: true } })
-        ]);
+        // Extract userId from client identity
+        const userId = fromClient.startsWith('client:') ? fromClient.replace('client:', '') : undefined;
 
-        // Fallback Strategy
-        const rawFrom = settings?.twilioFromNumbers || process.env.TWILIO_FROM_NUMBER || "";
-        let callerId = rawFrom.split(',')[0].trim();
+        // Smart rotation: select number with cooldown awareness
+        const result = await selectOutboundNumber({
+            userId,
+            targetNumber: to,
+            channel: "CALL"
+        });
 
-        // DEBUG LOGGING THE ATTEMPT (Non-blocking)
-        prisma.webhookPing.create({
-            data: {
-                source: 'TWIML_OUTBOUND_DEBUG',
-                data: JSON.stringify({
-                    fromClient,
-                    to,
-                    initialFallback: callerId,
-                    poolSize: pool.length
-                })
-            }
-        }).catch(e => console.error("[TwiML] DB Log Error:", e));
+        let callerId = result?.phoneNumber || "";
 
-        // 2. Prioritize Number Pool Rotation
-        if (pool.length > 0) {
-            // Match area code if to looks like a number
-            const toClean = (to || '').replace(/\D/g, '');
-            if (toClean.length >= 3) {
-                const targetAreaCode = toClean.substring(2, 3); // +61 2... -> index 2 is '2'
-                const match = pool.find(n => n.phoneNumber.replace(/\D/g, '').substring(2, 3) === targetAreaCode);
-                if (match) {
-                    callerId = match.phoneNumber;
-                    console.log(`[TwiML] Pool Area Match: ${callerId}`);
-                } else {
-                    callerId = pool[Math.floor(Math.random() * pool.length)].phoneNumber;
-                    console.log(`[TwiML] Pool Random Rotation: ${callerId}`);
-                }
-            } else {
-                callerId = pool[Math.floor(Math.random() * pool.length)].phoneNumber;
-            }
+        // Final fallback if rotation returned nothing
+        if (!callerId) {
+            const settings = await prisma.settings.findUnique({ where: { id: 'singleton' } });
+            callerId = settings?.twilioFromNumbers?.split(',')[0]?.trim() || "";
         }
 
-        // 3. Normalize Caller ID
+        // Normalize Caller ID
         if (callerId && !callerId.startsWith('+')) {
             if (callerId.startsWith('0')) callerId = '+61' + callerId.substring(1);
             else callerId = '+61' + callerId;
@@ -64,7 +41,7 @@ export async function POST(req: Request) {
             return new NextResponse(response.toString(), { headers: { "Content-Type": "text/xml" } });
         }
 
-        // 4. Dialing Logic
+        // Dialing Logic
         const dial = response.dial({ callerId });
 
         // Normalize Target Number
@@ -80,10 +57,8 @@ export async function POST(req: Request) {
             dial.number(target);
         }
 
-        // 5. Audit Log (Async)
-        if (fromClient.startsWith('client:')) {
-            const userId = fromClient.replace('client:', '');
-            // We use static lead lookup to associate the call
+        // Audit Log (Async)
+        if (userId) {
             prisma.lead.findFirst({ where: { phoneNumber: to } }).then(lead => {
                 if (lead) {
                     prisma.call.create({

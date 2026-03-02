@@ -44,7 +44,7 @@ export async function PATCH(
             }
         }
 
-        const result = await updateLeadDisposition(id, userId, body, { sendSMS, createGoogleMeeting, sendGmailConfirmation });
+        const result = await updateLeadDisposition(id, userId, body, { sendSMS, createGoogleMeeting, sendGmailConfirmation }, body.fromNumber);
 
         return NextResponse.json({ success: true, lead: result.lead, dispatch: result.dispatch });
 

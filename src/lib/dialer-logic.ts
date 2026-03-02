@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { normalizeToE164 } from "./phone-utils";
 import { LeadStatus, LeadStatusType } from "./types";
+import { selectOutboundNumber } from "./number-rotation";
 
 // Helper to strictly format time based on offset number (Nuclear Option against Server Timezone)
 const formatTimeStrict = (date: Date, offsetStr: string | undefined) => {
@@ -94,60 +95,8 @@ export async function getNextLead(userId: string, forcedLeadId?: string, campaig
 }
 
 export async function getRotatingNumber(userId?: string) {
-    // 1. Try to find a number OWNED by this user
-    if (userId) {
-        const ownedNumber = await prisma.numberPool.findFirst({
-            where: {
-                isActive: true,
-                ownerUserId: userId,
-                OR: [
-                    { cooldownUntil: null },
-                    { cooldownUntil: { lte: new Date() } }
-                ]
-            },
-            orderBy: [
-                { lastUsedAt: "asc" }, // Rotate among own numbers
-                { dailyCount: "asc" }
-            ]
-        });
-
-        if (ownedNumber) {
-            // Update usage
-            await prisma.numberPool.update({
-                where: { id: ownedNumber.id },
-                data: { lastUsedAt: new Date(), dailyCount: { increment: 1 } }
-            });
-            return ownedNumber.phoneNumber;
-        }
-    }
-
-    // 2. Fallback: Find any UNASSIGNED number (Shared Pool)
-    const sharedNumber = await prisma.numberPool.findFirst({
-        where: {
-            isActive: true,
-            ownerUserId: null, // Only unassigned
-            OR: [
-                { cooldownUntil: null },
-                { cooldownUntil: { lte: new Date() } }
-            ]
-        },
-        orderBy: [
-            { lastUsedAt: "asc" },
-            { dailyCount: "asc" }
-        ]
-    });
-
-    if (sharedNumber) {
-        await prisma.numberPool.update({
-            where: { id: sharedNumber.id },
-            data: { lastUsedAt: new Date(), dailyCount: { increment: 1 } }
-        });
-        return sharedNumber.phoneNumber;
-    }
-
-    // 3. Last Resort: Settings Main Number
-    const settings = await prisma.settings.findFirst();
-    return settings?.twilioFromNumbers || null;
+    const result = await selectOutboundNumber({ userId, channel: "CALL" });
+    return result?.phoneNumber || null;
 }
 
 export async function releaseLead(leadId: string, status: LeadStatusType = LeadStatus.READY) {
@@ -183,7 +132,8 @@ export async function updateLeadDisposition(
     leadId: string,
     userId: string,
     params: DispositionParams,
-    deps: DispositionDeps = {}
+    deps: DispositionDeps = {},
+    actualFromNumber?: string
 ) {
     const { status, nextCallAt, notes, contactData, customMessage, timezone, includeMeetLink, includeCalendarLink, meetingTitle } = params;
 
@@ -230,21 +180,45 @@ export async function updateLeadDisposition(
         },
     });
 
-    // Log the call/outcome
+    // Log the call/outcome — update existing initiated Call if one exists (avoids duplicates)
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { repPhoneNumber: true, id: true, name: true, email: true } });
 
-    await prisma.call.create({
-        data: {
+    const existingCall = await prisma.call.findFirst({
+        where: {
             leadId: lead.id,
             userId: userId,
-            direction: "OUTBOUND",
-            fromNumber: user?.repPhoneNumber || "UNKNOWN",
-            toNumber: lead.phoneNumber,
-            status: "completed",
-            outcome: status,
-            notes: customMessage ? `${notes}\n\n[Dispatched Message]: ${customMessage}` : notes,
-        }
+            status: "initiated",
+        },
+        orderBy: { createdAt: "desc" }
     });
+
+    if (existingCall) {
+        await prisma.call.update({
+            where: { id: existingCall.id },
+            data: {
+                status: "completed",
+                outcome: status,
+                notes: customMessage ? `${notes}\n\n[Dispatched Message]: ${customMessage}` : notes,
+                // Preserve fromNumber from the initiated record (set correctly by TwiML routes)
+                ...(actualFromNumber && existingCall.fromNumber === "UNKNOWN" ? { fromNumber: actualFromNumber } : {})
+            }
+        });
+    } else {
+        // No pre-existing record — resolve fromNumber via pool
+        const resolvedFrom = actualFromNumber || (await getRotatingNumber(userId)) || user?.repPhoneNumber || "UNKNOWN";
+        await prisma.call.create({
+            data: {
+                leadId: lead.id,
+                userId: userId,
+                direction: "OUTBOUND",
+                fromNumber: resolvedFrom,
+                toNumber: lead.phoneNumber,
+                status: "completed",
+                outcome: status,
+                notes: customMessage ? `${notes}\n\n[Dispatched Message]: ${customMessage}` : notes,
+            }
+        });
+    }
 
     // IF CALLBACK -> Create Callback entry
     if (status === 'CALLBACK' && nextCallAt) {
