@@ -162,10 +162,11 @@ export function MessageThread({ conversationId, leadId, participantName, onMessa
                 fetchMessages();
                 onMessageSent?.();
             } else {
+                const errData = await res.json().catch(() => ({}));
                 addNotification({
                     type: 'error',
                     title: 'Delivery Failed',
-                    message: 'Could not send SMS to lead.'
+                    message: errData.error || 'Could not send SMS to lead.'
                 });
                 setInputValue(body); // Restore on fail
             }

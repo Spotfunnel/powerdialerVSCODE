@@ -2,6 +2,7 @@ import twilio from "twilio";
 import { PrismaClient } from "@prisma/client";
 
 import { prisma } from "./prisma";
+import { selectOutboundNumber } from "./number-rotation";
 
 export async function initiateBridgeCall(leadId: string, userId: string) {
     // 1. Fetch settings and user
@@ -103,21 +104,14 @@ export async function sendSMS(to: string, body: string) {
             cleanTo = '+61' + cleanTo.substring(1);
         }
 
-        // Match Caller ID Logic from bridge/route.ts (NumberPool)
+        // Smart rotation for sender number
         let from = settings.twilioFromNumbers.split(",")[0];
-        const pool = await prisma.numberPool.findMany({ where: { isActive: true } });
-
-        if (pool.length > 0) {
-            const toDigits = cleanTo.replace(/\D/g, '');
-            const targetAreaCode = toDigits.substring(2, 3);
-
-            // Bridge logic: match area code (char index 2)
-            const match = pool.find(n => n.phoneNumber.replace(/\D/g, '').substring(2, 3) === targetAreaCode);
-            if (match) {
-                from = match.phoneNumber;
-            } else {
-                from = pool[0].phoneNumber;
-            }
+        const rotationResult = await selectOutboundNumber({
+            targetNumber: cleanTo,
+            channel: "SMS"
+        });
+        if (rotationResult) {
+            from = rotationResult.phoneNumber;
         }
 
         const message = await client.messages.create({

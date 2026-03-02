@@ -1,3 +1,15 @@
+/**
+ * Checks if an Australian E.164 number is a landline (cannot receive SMS).
+ * AU landlines: +61 2/3/7/8 (area codes for NSW, VIC, QLD, SA/WA/NT/TAS)
+ * AU mobiles: +61 4xx (always start with 4)
+ */
+export function isAustralianLandline(e164Number: string): boolean {
+    if (!e164Number.startsWith('+61')) return false;
+    const afterCountry = e164Number.substring(3);
+    // AU mobiles start with 4, everything else (2,3,7,8) is landline
+    return afterCountry.length >= 1 && /^[23789]/.test(afterCountry);
+}
+
 export function normalizeToE164(phoneNumber: string): string {
     if (!phoneNumber) return "";
 

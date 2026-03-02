@@ -2,6 +2,7 @@ import twilio from "twilio";
 import { prisma } from "./prisma";
 import { decrypt } from "./encryption";
 import { normalizeToE164 } from "./phone-utils";
+import { selectOutboundNumber } from "./number-rotation";
 
 export async function getCredentials() {
     const settings = await prisma.settings.findUnique({ where: { id: "singleton" } });
@@ -140,45 +141,17 @@ export async function sendSMS(
             }
         }
 
-        // Final fallbacks
+        // Fallback: use smart rotation (replaces user phones, assigned user phones, emergency pool)
         if (!fromNumber) {
-            if (userId) {
-                const sender = await prisma.user.findUnique({
-                    where: { id: userId },
-                    include: { phones: { where: { isActive: true } } }
-                });
-                if (sender?.phones && sender.phones.length > 0) {
-                    fromNumber = sender.phones[0].phoneNumber;
-                    twilioNumberId = sender.phones[0].id;
-                }
-            }
-
-            if (!fromNumber && lead?.assignedTo?.phones && lead.assignedTo.phones.length > 0) {
-                const activePhone = lead.assignedTo.phones.find(p => p.isActive);
-                if (activePhone) {
-                    fromNumber = activePhone.phoneNumber;
-                    twilioNumberId = activePhone.id;
-                }
-            }
-
-            if (!fromNumber) {
-                fromNumber = defaultFrom;
-            }
-        }
-
-        // Final desperation fallback: query the pool one last time if still empty
-        if (!fromNumber) {
-            console.log("[SMS] Still no fromNumber. Trying emergency pool lookup...");
-            const emergencyPool = await prisma.numberPool.findMany();
-            console.log(`[SMS] Emergency check found ${emergencyPool.length} entries.`);
-
-            const emergencyFallback = emergencyPool.find(n => n.isActive);
-            fromNumber = emergencyFallback?.phoneNumber;
-
-            if (fromNumber) {
-                console.log(`[SMS] Emergency fallback successful: ${fromNumber}`);
-            } else {
-                console.error(`[SMS] Emergency fallback FAILED. Pool size: ${emergencyPool.length}.`);
+            const rotationResult = await selectOutboundNumber({
+                userId: userId || undefined,
+                targetNumber: cleanTo,
+                channel: "SMS"
+            });
+            if (rotationResult) {
+                fromNumber = rotationResult.phoneNumber;
+                twilioNumberId = rotationResult.numberId || null;
+                console.log(`[SMS] Smart rotation (${rotationResult.method}): ${fromNumber}`);
             }
         }
 

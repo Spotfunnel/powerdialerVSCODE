@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { sendSMS } from "@/lib/twilio";
-import { prisma } from "@/lib/prisma"; // Added prisma for rate limit check
+import { prisma } from "@/lib/prisma";
+import { normalizeToE164, isAustralianLandline } from "@/lib/phone-utils";
 
 export async function POST(req: Request) {
     let bodyText = "";
@@ -68,6 +69,15 @@ export async function POST(req: Request) {
 
         if (!recipientsNumber) {
             return NextResponse.json({ error: "Missing 'to' number and could not resolve from Lead ID" }, { status: 400 });
+        }
+
+        // Validate: block SMS to Australian landlines (they can't receive SMS)
+        const normalizedRecipient = normalizeToE164(recipientsNumber);
+        if (isAustralianLandline(normalizedRecipient)) {
+            return NextResponse.json(
+                { error: "Cannot send SMS to a landline number. This appears to be an Australian landline." },
+                { status: 400 }
+            );
         }
 
         const userId = (session.user as any).id;
