@@ -410,6 +410,7 @@ export default function ContactsPage() {
                                 onContactClick={handleContactClick}
                                 onWizardClick={handleWizardClick}
                                 onMessageClick={handleMessageClick}
+                                onEditClick={handleEditClick}
                                 isSelected={selectedLeads.has(lead.id)}
                                 onToggleSelect={() => toggleSelectLead(lead.id)}
                             />
@@ -433,6 +434,7 @@ export default function ContactsPage() {
                             onContactClick={handleContactClick}
                             onWizardClick={handleWizardClick}
                             onMessageClick={handleMessageClick}
+                            onEditClick={handleEditClick}
                         />
                     ))}
                 </div>

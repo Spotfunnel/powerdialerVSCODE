@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { cn } from "@/lib/utils";
-import { Building2, Phone, Briefcase, MessageSquare } from "lucide-react";
+import { Building2, Phone, Briefcase, MessageSquare, Pencil } from "lucide-react";
 
 interface ContactRowProps {
     lead: any;
@@ -10,11 +10,12 @@ interface ContactRowProps {
     onContactClick: (id: string) => void;
     onWizardClick: (lead: any) => void;
     onMessageClick: (id: string) => void;
+    onEditClick: (e: React.MouseEvent, lead: any) => void;
     isSelected?: boolean;
     onToggleSelect?: () => void;
 }
 
-export const ContactRow = memo(({ lead, columns, onContactClick, onWizardClick, onMessageClick, isSelected, onToggleSelect }: ContactRowProps) => {
+export const ContactRow = memo(({ lead, columns, onContactClick, onWizardClick, onMessageClick, onEditClick, isSelected, onToggleSelect }: ContactRowProps) => {
     return (
         <tr
             onClick={() => onContactClick(lead.id)}
@@ -121,6 +122,13 @@ export const ContactRow = memo(({ lead, columns, onContactClick, onWizardClick, 
                         return (
                             <td key={col.id} className="px-4 py-4 text-right">
                                 <div className="flex items-center justify-end gap-2">
+                                    <button
+                                        onClick={(e) => onEditClick(e, lead)}
+                                        className="h-8 w-8 bg-white border border-zinc-200 rounded-lg text-zinc-500 hover:text-teal-600 hover:border-teal-200 hover:bg-teal-50 transition-all shadow-sm active:scale-95 flex items-center justify-center"
+                                        title="Edit Contact"
+                                    >
+                                        <Pencil className="h-3 w-3" />
+                                    </button>
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();

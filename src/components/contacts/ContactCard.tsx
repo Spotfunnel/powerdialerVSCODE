@@ -2,16 +2,17 @@
 
 import { memo } from "react";
 import { cn } from "@/lib/utils";
-import { Building2, Phone, Briefcase, MessageSquare } from "lucide-react";
+import { Building2, Phone, Briefcase, MessageSquare, Pencil } from "lucide-react";
 
 interface ContactCardProps {
     lead: any;
     onContactClick: (id: string) => void;
     onWizardClick: (lead: any) => void;
     onMessageClick: (id: string) => void;
+    onEditClick: (e: React.MouseEvent, lead: any) => void;
 }
 
-export const ContactCard = memo(({ lead, onContactClick, onWizardClick, onMessageClick }: ContactCardProps) => {
+export const ContactCard = memo(({ lead, onContactClick, onWizardClick, onMessageClick, onEditClick }: ContactCardProps) => {
     return (
         <div
             onClick={() => onContactClick(lead.id)}
@@ -50,6 +51,7 @@ export const ContactCard = memo(({ lead, onContactClick, onWizardClick, onMessag
                 </div>
 
                 <div className="flex items-center gap-1">
+                    <button onClick={(e) => onEditClick(e, lead)} className="h-9 w-9 flex items-center justify-center rounded-xl bg-zinc-50 border border-zinc-100 text-zinc-500 active:scale-95" title="Edit Contact"><Pencil className="h-4 w-4" /></button>
                     <button onClick={(e) => { e.stopPropagation(); onWizardClick(lead); }} className="h-9 w-9 flex items-center justify-center rounded-xl bg-zinc-50 border border-zinc-100 text-zinc-500 active:scale-95"><Briefcase className="h-4 w-4" /></button>
                     <button
                         onClick={(e) => {
