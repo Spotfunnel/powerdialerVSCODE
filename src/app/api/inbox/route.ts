@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, withPrismaRetry } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -55,8 +55,11 @@ export async function GET(req: Request) {
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     try {
-        // Parallel queries — no filtering, no side effects, just reads
-        const [conversations, calls] = await Promise.all([
+        // Parallel queries — no filtering, no side effects, just reads.
+        // Wrapped in withPrismaRetry to survive Vercel cold-start blips
+        // (Supabase pooler "max clients reached" / P1001 transient errors)
+        // that were surfacing as the user-facing "Could not load inbox" toast.
+        const [conversations, calls] = await withPrismaRetry(() => Promise.all([
             prisma.conversation.findMany({
                 include: {
                     contact: {
@@ -81,7 +84,7 @@ export async function GET(req: Request) {
                 },
                 orderBy: { createdAt: 'desc' }
             })
-        ]);
+        ]));
 
         // Map conversations to inbox items
         const smsItems: InboxItem[] = conversations.map(c => {
@@ -148,8 +151,19 @@ export async function GET(req: Request) {
 
         return NextResponse.json(items);
 
-    } catch (error) {
-        console.error("[Inbox] Failed to fetch", error);
-        return NextResponse.json({ error: "Server Error" }, { status: 500 });
+    } catch (error: any) {
+        // Structured logging so production failures are diagnosable from
+        // Vercel logs alone — generic "Server Error" responses with no
+        // server-side context made the original bug invisible.
+        console.error("[Inbox] Failed to fetch", {
+            message: error?.message,
+            code: error?.code,
+            name: error?.name,
+        });
+        return NextResponse.json({
+            error: "Server Error",
+            code: error?.code ?? null,
+            message: process.env.NODE_ENV === "production" ? undefined : error?.message,
+        }, { status: 500 });
     }
 }

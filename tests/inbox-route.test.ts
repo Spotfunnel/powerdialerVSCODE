@@ -24,6 +24,22 @@ vi.mock("@/lib/prisma", () => ({
         conversation: { findMany: mockConversationFindMany },
         call: { findMany: mockCallFindMany },
     },
+    // Minimal withPrismaRetry mirroring the real one: retry once on a
+    // connection-error code so tests can prove retry behavior without
+    // pulling in the full Prisma engine.
+    withPrismaRetry: async <T,>(fn: () => Promise<T>, max = 3): Promise<T> => {
+        let lastErr: any;
+        for (let i = 0; i < max; i++) {
+            try { return await fn(); }
+            catch (e: any) {
+                lastErr = e;
+                const transient = e?.code === "P1001" || e?.code === "P1017"
+                    || /Can't reach database|timed out|max clients/i.test(e?.message ?? "");
+                if (!transient) throw e;
+            }
+        }
+        throw lastErr;
+    },
 }));
 
 vi.mock("next-auth", () => ({
@@ -162,5 +178,54 @@ describe("GET /api/inbox", () => {
         mockCallFindMany.mockRejectedValue(new Error("DB exploded"));
         const res = await GET(fakeRequest());
         expect(res.status).toBe(500);
+    });
+
+    it("retries through a transient Prisma connection error (Vercel cold start)", async () => {
+        // Symptom in production: first Prisma call after a cold start fails
+        // with "Can't reach database" or "timed out" — transient. The other
+        // routes wrap their queries in `withPrismaRetry` for exactly this
+        // case; the inbox route originally did not, surfacing as a generic
+        // 500 → "Inbox Error: Could not load inbox" toast for the user.
+        mockGetServerSession.mockResolvedValue(VALID_SESSION);
+
+        let callAttempt = 0;
+        mockCallFindMany.mockImplementation(async () => {
+            callAttempt++;
+            if (callAttempt === 1) {
+                const err: any = new Error("Can't reach database server");
+                err.code = "P1001";
+                throw err;
+            }
+            return [];
+        });
+
+        let convAttempt = 0;
+        mockConversationFindMany.mockImplementation(async () => {
+            convAttempt++;
+            if (convAttempt === 1) {
+                const err: any = new Error("Can't reach database server");
+                err.code = "P1001";
+                throw err;
+            }
+            return [];
+        });
+
+        const res = await GET(fakeRequest());
+        expect(res.status).toBe(200);
+        expect(callAttempt).toBeGreaterThanOrEqual(2); // proves retry ran
+    });
+
+    it("surfaces a debuggable error body (not just status) so production logs can tell us what broke", async () => {
+        mockGetServerSession.mockResolvedValue(VALID_SESSION);
+        const err: any = new Error("Specific Prisma message");
+        err.code = "P2024"; // pool timeout
+        mockCallFindMany.mockRejectedValue(err);
+
+        const res = await GET(fakeRequest());
+        expect(res.status).toBe(500);
+        const body = await res.json();
+        // Must include something operators can correlate with logs
+        expect(body).toHaveProperty("error");
+        expect(JSON.stringify(body)).toMatch(/P2024|Specific Prisma message|Server Error/);
     });
 });

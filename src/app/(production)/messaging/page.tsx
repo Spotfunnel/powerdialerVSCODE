@@ -81,12 +81,25 @@ function InboxContent() {
     const fetchInbox = useCallback(async () => {
         try {
             const res = await fetch('/api/inbox');
-            if (!res.ok) throw new Error(`Server returned ${res.status}`);
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                console.error("[Inbox] Non-OK response", { status: res.status, body });
+                if (res.status === 401) {
+                    addNotification({ type: 'error', title: 'Session Expired', message: 'Please sign in again.' });
+                    return;
+                }
+                addNotification({
+                    type: 'error',
+                    title: `Inbox Error (${res.status})`,
+                    message: body?.code ? `${body.code}: ${body.message ?? 'server error'}` : 'Could not load inbox.',
+                });
+                return;
+            }
             const data = await res.json();
             setItems(data);
         } catch (e) {
             console.error("Failed to fetch inbox", e);
-            addNotification({ type: 'error', title: 'Inbox Error', message: 'Could not load inbox.' });
+            addNotification({ type: 'error', title: 'Inbox Error', message: 'Network error — could not reach inbox.' });
         } finally {
             setIsLoading(false);
         }
