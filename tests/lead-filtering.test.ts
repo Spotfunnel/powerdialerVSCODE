@@ -36,33 +36,50 @@ const mockLeadActivityCreate = vi.fn();
 const mockSettingsFindUnique = vi.fn();
 const mockNumberPoolFindMany = vi.fn();
 
-vi.mock("@/lib/prisma", () => ({
-    prisma: {
-        $queryRaw: (...args: any[]) => mockQueryRaw(...args),
-        lead: {
-            findFirst: (...a: any[]) => mockLeadFindFirst(...a),
-            findUnique: (...a: any[]) => mockLeadFindUnique(...a),
-            update: (...a: any[]) => mockLeadUpdate(...a),
-        },
-        user: { findUnique: (...a: any[]) => mockUserFindUnique(...a) },
+vi.mock("@/lib/prisma", () => {
+    // Tx stub points to the SAME mock fns as top-level prisma so existing
+    // assertions on mockLeadUpdate/mockCallUpdate/etc. continue to work whether
+    // the call site uses `prisma.lead.update` (legacy) or `tx.lead.update`
+    // (new $transaction-wrapped path).
+    const tx = {
+        lead: { update: (...a: any[]) => mockLeadUpdate(...a) },
         call: {
             findFirst: (...a: any[]) => mockCallFindFirst(...a),
             update: (...a: any[]) => mockCallUpdate(...a),
             create: (...a: any[]) => mockCallCreate(...a),
         },
         callback: { create: (...a: any[]) => mockCallbackCreate(...a) },
-        meeting: {
-            create: (...a: any[]) => mockMeetingCreate(...a),
-            update: (...a: any[]) => mockMeetingUpdate(...a),
+        meeting: { create: (...a: any[]) => mockMeetingCreate(...a) },
+    };
+    return {
+        prisma: {
+            $queryRaw: (...args: any[]) => mockQueryRaw(...args),
+            $transaction: (cb: (tx: any) => Promise<any>) => cb(tx),
+            lead: {
+                findFirst: (...a: any[]) => mockLeadFindFirst(...a),
+                findUnique: (...a: any[]) => mockLeadFindUnique(...a),
+                update: (...a: any[]) => mockLeadUpdate(...a),
+            },
+            user: { findUnique: (...a: any[]) => mockUserFindUnique(...a) },
+            call: {
+                findFirst: (...a: any[]) => mockCallFindFirst(...a),
+                update: (...a: any[]) => mockCallUpdate(...a),
+                create: (...a: any[]) => mockCallCreate(...a),
+            },
+            callback: { create: (...a: any[]) => mockCallbackCreate(...a) },
+            meeting: {
+                create: (...a: any[]) => mockMeetingCreate(...a),
+                update: (...a: any[]) => mockMeetingUpdate(...a),
+            },
+            calendarConnection: {
+                findUnique: (...a: any[]) => mockCalendarConnectionFindUnique(...a),
+            },
+            leadActivity: { create: (...a: any[]) => mockLeadActivityCreate(...a) },
+            settings: { findUnique: (...a: any[]) => mockSettingsFindUnique(...a) },
+            numberPool: { findMany: (...a: any[]) => mockNumberPoolFindMany(...a) },
         },
-        calendarConnection: {
-            findUnique: (...a: any[]) => mockCalendarConnectionFindUnique(...a),
-        },
-        leadActivity: { create: (...a: any[]) => mockLeadActivityCreate(...a) },
-        settings: { findUnique: (...a: any[]) => mockSettingsFindUnique(...a) },
-        numberPool: { findMany: (...a: any[]) => mockNumberPoolFindMany(...a) },
-    },
-}));
+    };
+});
 
 // number-rotation pulls prisma too, but we also mock its public API to keep
 // updateLeadDisposition's getRotatingNumber side-effect free.
