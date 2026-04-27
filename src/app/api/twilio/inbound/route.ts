@@ -13,12 +13,10 @@ export async function POST(req: Request) {
         const url = req.url;
 
         // Security Audit: Validate Twilio Signature
-        if (process.env.NODE_ENV === "production") {
-            const isValid = await validateTwilioRequest(req, url, params);
-            if (!isValid) {
-                console.error("[Security] INVALID TWILIO SIGNATURE on inbound voice route.");
-                return new NextResponse("Unauthorized", { status: 401 });
-            }
+        const isValid = await validateTwilioRequest(req, url, params);
+        if (!isValid) {
+            console.error("[Security] INVALID TWILIO SIGNATURE on inbound voice route.");
+            return new NextResponse("Unauthorized", { status: 401 });
         }
 
         const rawFrom = formData.get('Caller') as string || 'Unknown';

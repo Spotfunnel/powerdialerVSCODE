@@ -2,11 +2,20 @@ import { NextResponse } from 'next/server';
 import Twilio from 'twilio';
 import { prisma } from '@/lib/prisma';
 import { selectOutboundNumber } from '@/lib/number-rotation';
+import { validateTwilioRequest } from '@/lib/twilio';
 
 // This is the webhook Twilio calls when the browser makes a call
 export async function POST(req: Request) {
     try {
         const formData = await req.formData();
+        const params = Object.fromEntries(formData.entries());
+
+        const isValid = await validateTwilioRequest(req, req.url, params);
+        if (!isValid) {
+            console.error("[Security] INVALID TWILIO SIGNATURE on voice/twiml route.");
+            return new NextResponse("Unauthorized", { status: 401 });
+        }
+
         const to = formData.get('To') as string;
         const fromClient = formData.get('From') as string || 'unknown';
 

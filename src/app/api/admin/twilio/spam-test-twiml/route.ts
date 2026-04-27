@@ -1,8 +1,26 @@
 import { NextResponse } from "next/server";
+import { validateTwilioRequest } from "@/lib/twilio";
+
+function escapeXml(s: string): string {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+}
 
 export async function GET(req: Request) {
-    const { searchParams } = new URL(req.url);
-    const from = searchParams.get("from") || "unknown number";
+    const url = new URL(req.url);
+    const params = Object.fromEntries(url.searchParams.entries());
+
+    const isValid = await validateTwilioRequest(req, req.url, params);
+    if (!isValid) {
+        console.error("[Security] INVALID TWILIO SIGNATURE on spam-test-twiml route.");
+        return new NextResponse("Unauthorized", { status: 401 });
+    }
+
+    const from = escapeXml(url.searchParams.get("from") || "unknown number");
 
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>

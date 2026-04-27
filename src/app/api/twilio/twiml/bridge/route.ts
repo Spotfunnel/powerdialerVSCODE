@@ -1,10 +1,28 @@
 import { prisma } from "@/lib/prisma";
 import { selectOutboundNumber } from "@/lib/number-rotation";
+import { validateTwilioRequest } from "@/lib/twilio";
+
+function escapeXml(s: string): string {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+}
 
 export async function GET(req: Request) {
-    const { searchParams } = new URL(req.url);
-    const leadId = searchParams.get("leadId");
-    const userId = searchParams.get("userId");
+    const url = new URL(req.url);
+    const params = Object.fromEntries(url.searchParams.entries());
+
+    const isValid = await validateTwilioRequest(req, req.url, params);
+    if (!isValid) {
+        console.error("[Security] INVALID TWILIO SIGNATURE on twiml/bridge route.");
+        return new Response("Unauthorized", { status: 401 });
+    }
+
+    const leadId = url.searchParams.get("leadId");
+    const userId = url.searchParams.get("userId");
 
     if (!leadId) {
         return new Response("Missing leadId", { status: 400 });
@@ -61,14 +79,14 @@ export async function GET(req: Request) {
         const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Dial
-        callerId="${callerId}"
+        callerId="${escapeXml(callerId)}"
         timeout="20"
         action="/api/twilio/status"
         record="record-from-answer"
         recordingStatusCallback="/api/twilio/recording"
         recordingStatusCallbackEvent="completed"
     >
-        <Number>${lead.phoneNumber}</Number>
+        <Number>${escapeXml(lead.phoneNumber)}</Number>
     </Dial>
 </Response>`;
 

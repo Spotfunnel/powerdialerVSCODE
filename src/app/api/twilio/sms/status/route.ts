@@ -1,9 +1,18 @@
 import { NextResponse } from 'next/server';
 import { prismaDirect, withPrismaRetry } from '@/lib/prisma';
+import { validateTwilioRequest } from '@/lib/twilio';
 
 export async function POST(req: Request) {
     try {
         const formData = await req.formData();
+        const params = Object.fromEntries(formData.entries());
+
+        const isValid = await validateTwilioRequest(req, req.url, params);
+        if (!isValid) {
+            console.error("[Security] INVALID TWILIO SIGNATURE on sms/status route.");
+            return new NextResponse("Unauthorized", { status: 401 });
+        }
+
         const messageSid = formData.get('MessageSid') as string;
         const messageStatus = formData.get('MessageStatus') as string; // queued, failed, sent, delivered, undelivered
         const errorCode = formData.get('ErrorCode') as string;
