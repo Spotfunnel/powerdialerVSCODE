@@ -60,8 +60,9 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                 if (!audioCtxRef.current) {
                     audioCtxRef.current = new AC();
                 }
-                if (audioCtxRef.current.state === 'suspended') {
-                    await audioCtxRef.current.resume();
+                const ctx = audioCtxRef.current!;
+                if (ctx.state === 'suspended') {
+                    await ctx.resume();
                     console.log("[Twilio] AudioContext Resumed Successfully");
                 }
             }

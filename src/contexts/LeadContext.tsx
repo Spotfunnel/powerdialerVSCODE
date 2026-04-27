@@ -21,12 +21,19 @@ export interface UserStats {
     revenue: number;
 }
 
+export interface DispositionDispatch {
+    calendar?: 'success' | 'failed' | 'skipped';
+    calendarError?: string;
+    sms?: 'success' | 'failed' | 'skipped' | 'blocked-landline';
+    smsError?: string;
+}
+
 interface LeadContextType {
     currentLead: Lead | null;
     loading: boolean;
     fetchNextLead: (forcedId?: string) => Promise<void>;
     fetchPreviousLead: () => Promise<void>;
-    updateLeadStatus: (status: string, nextCallAt?: Date, userId?: string, notes?: string, contactData?: Partial<Lead>, customMessage?: string, timezone?: string, includeMeetLink?: boolean, includeCalendarLink?: boolean, meetingTitle?: string) => Promise<void>;
+    updateLeadStatus: (status: string, nextCallAt?: Date, userId?: string, notes?: string, contactData?: Partial<Lead>, customMessage?: string, timezone?: string, includeMeetLink?: boolean, includeCalendarLink?: boolean, meetingTitle?: string) => Promise<DispositionDispatch | null>;
     events: CalendarEvent[];
     addEvent: (event: CalendarEvent) => void;
     stats: UserStats;
