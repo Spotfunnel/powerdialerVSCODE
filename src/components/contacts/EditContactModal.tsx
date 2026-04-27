@@ -19,7 +19,10 @@ export function EditContactModal({ isOpen, onClose, lead, onSave }: EditContactM
         phoneNumber: lead?.phoneNumber || "",
         suburb: lead?.suburb || "",
         state: lead?.state || "",
-        industry: lead?.industry || ""
+        industry: lead?.industry || "",
+        status: lead?.status || "READY",
+        website: lead?.website || "",
+        notes: lead?.notes || "",
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -33,10 +36,13 @@ export function EditContactModal({ isOpen, onClose, lead, onSave }: EditContactM
                 firstName: lead.firstName || "",
                 lastName: lead.lastName || "",
                 email: lead.email || "",
-                phoneNumber: lead.phoneNumber || "", // If lead has no phone, it's empty.
+                phoneNumber: lead.phoneNumber || "",
                 suburb: lead.suburb || "",
                 state: lead.state || "",
-                industry: lead.industry || ""
+                industry: lead.industry || "",
+                status: lead.status || "READY",
+                website: lead.website || "",
+                notes: lead.notes || "",
             }));
             setError(null);
         }
@@ -144,7 +150,7 @@ export function EditContactModal({ isOpen, onClose, lead, onSave }: EditContactM
 
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Suburb</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Suburb / City</label>
                             <input
                                 value={formData.suburb}
                                 onChange={e => setFormData({ ...formData, suburb: e.target.value })}
@@ -159,6 +165,50 @@ export function EditContactModal({ isOpen, onClose, lead, onSave }: EditContactM
                                 className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl text-sm font-bold text-zinc-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all"
                             />
                         </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Website</label>
+                            <input
+                                value={formData.website}
+                                onChange={e => setFormData({ ...formData, website: e.target.value })}
+                                placeholder="example.com"
+                                className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl text-sm font-bold text-zinc-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Status</label>
+                            <select
+                                value={formData.status}
+                                onChange={e => setFormData({ ...formData, status: e.target.value })}
+                                className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl text-sm font-bold text-zinc-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all"
+                            >
+                                <option value="READY">Ready</option>
+                                <option value="LOCKED">Locked</option>
+                                <option value="CALLBACK">Callback</option>
+                                <option value="BOOKED">Booked</option>
+                                <option value="INTERESTED">Interested</option>
+                                <option value="NOT_INTERESTED">Not Interested</option>
+                                <option value="NO_ANSWER">No Answer</option>
+                                <option value="DQ">Disqualified</option>
+                                <option value="SOLD">Sold</option>
+                                <option value="ONBOARDED">Onboarded</option>
+                                <option value="KEY_INFO_COLLECTED">Key Info</option>
+                                <option value="ARCHIVED">Archived</option>
+                                <option value="TALKING">Talking</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Notes</label>
+                        <textarea
+                            value={formData.notes}
+                            onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                            rows={3}
+                            className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl text-sm font-bold text-zinc-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all resize-none"
+                        />
                     </div>
 
                     <div className="pt-4 flex justify-end gap-3">

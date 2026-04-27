@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { normalizeToE164 } from "@/lib/phone-utils";
 
 export async function GET(
     req: Request,
@@ -40,28 +41,29 @@ export async function PATCH(
     try {
         const body = await req.json();
         // Normalize phone: if just digits and starts with 04, make +614...
-        let { companyName, firstName, lastName, email, phoneNumber, suburb, state, industry } = body;
+        let { companyName, firstName, lastName, email, phoneNumber, suburb, state, industry, status, website, notes } = body;
 
         if (phoneNumber) {
-            phoneNumber = phoneNumber.replace(/\s+/g, ''); // Remove spaces
-            if (phoneNumber.startsWith('0')) {
-                phoneNumber = '+61' + phoneNumber.substring(1);
-            } else if (!phoneNumber.startsWith('+')) {
-                phoneNumber = '+61' + phoneNumber;
+            // Use shared normalizer (handles AU/US, strips double prefixes and spaces)
+            phoneNumber = normalizeToE164(phoneNumber);
+            if (!phoneNumber) {
+                return NextResponse.json({ error: "Invalid phone number format" }, { status: 400 });
             }
         }
 
-        // Sanitize empty strings to undefined
-        const cleanData = {
-            companyName: companyName || undefined,
-            firstName: firstName || undefined,
-            lastName: lastName || undefined,
-            email: email || undefined,
-            phoneNumber: phoneNumber || undefined,
-            suburb: suburb || undefined,
-            state: state || undefined,
-            industry: industry || undefined,
-        };
+        // Sanitize empty strings to undefined (but allow explicit null for clearing fields)
+        const cleanData: Record<string, any> = {};
+        if (companyName !== undefined) cleanData.companyName = companyName || undefined;
+        if (firstName !== undefined) cleanData.firstName = firstName || undefined;
+        if (lastName !== undefined) cleanData.lastName = lastName || undefined;
+        if (email !== undefined) cleanData.email = email || undefined;
+        if (phoneNumber !== undefined) cleanData.phoneNumber = phoneNumber || undefined;
+        if (suburb !== undefined) cleanData.suburb = suburb || undefined;
+        if (state !== undefined) cleanData.state = state || undefined;
+        if (industry !== undefined) cleanData.industry = industry || undefined;
+        if (status !== undefined) cleanData.status = status;
+        if (website !== undefined) cleanData.website = website || undefined;
+        if (notes !== undefined) cleanData.notes = notes || undefined;
 
         const updatedLead = await prisma.lead.update({
             where: { id: params.id },
