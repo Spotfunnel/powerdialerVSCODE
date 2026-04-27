@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { Device, Call } from "@twilio/voice-sdk";
+import { performHangup } from "@/lib/twilio-hangup";
 
 interface TwilioContextType {
     deviceState: 'offline' | 'ready' | 'error' | 'reconnecting';
@@ -20,7 +21,7 @@ interface TwilioContextType {
     resumeAudio: () => Promise<void>;
 }
 
-const TwilioContext = createContext<TwilioContextType | undefined>(undefined);
+export const TwilioContext = createContext<TwilioContextType | undefined>(undefined);
 
 export function useTwilio() {
     const context = useContext(TwilioContext);
@@ -294,17 +295,18 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
 
     const reject = async () => {
         await resumeAudio();
-        if (incomingConnection) {
-            incomingConnection.reject();
-        }
+        const next = performHangup(null, incomingConnection);
+        setIncomingConnection(next.incomingConnection);
+        ringtoneRef.current?.pause();
+        if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
     };
 
     const hangup = () => {
-        if (activeConnection) {
-            activeConnection.disconnect();
-        } else if (incomingConnection) {
-            incomingConnection.reject();
-        }
+        const next = performHangup(activeConnection, incomingConnection);
+        setActiveConnection(next.activeConnection);
+        setIncomingConnection(next.incomingConnection);
+        ringtoneRef.current?.pause();
+        if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
     };
 
     const toggleMute = () => {
