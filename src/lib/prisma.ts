@@ -79,19 +79,14 @@ export async function withPrismaRetry<T>(
     fn: () => Promise<T>,
     maxRetries = 3,
     delay = 1000,
-    autoDisconnect = false
+    _autoDisconnect = false // DEPRECATED: was killing the connection pool after every query, adding 100-300ms latency
 ): Promise<T> {
     let lastError: any;
     for (let i = 0; i < maxRetries; i++) {
         try {
-            const result = await fn();
-            if (autoDisconnect) {
-                await prisma.$disconnect();
-            }
-            return result;
+            return await fn();
         } catch (error: any) {
             lastError = error;
-            // Check for connection-related errors
             const isConnectionError =
                 error?.message?.includes("Can't reach database") ||
                 error?.message?.includes("timed out") ||
@@ -102,15 +97,9 @@ export async function withPrismaRetry<T>(
 
             if (isConnectionError && i < maxRetries - 1) {
                 console.warn(`[Prisma] Connection error, retrying in ${delay * (i + 1)}ms... (${i + 1}/${maxRetries})`);
-                // Disconnect and reconnect to clear stale connections
                 await prisma.$disconnect();
                 await new Promise(res => setTimeout(res, delay * (i + 1)));
                 continue;
-            }
-
-            // Still disconnect on final error if requested
-            if (autoDisconnect) {
-                await prisma.$disconnect().catch(() => { });
             }
             throw error;
         }

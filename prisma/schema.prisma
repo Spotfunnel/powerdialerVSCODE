@@ -93,11 +93,15 @@ model Lead {
   @@index([lastName])
   @@index([email])
   @@index([status])
+  @@index([status, lockedById, priority, nextCallAt, attempts, updatedAt], name: "Lead_acquisition_idx")
+  @@index([campaignId], name: "Lead_campaignId_idx")
+  @@index([state], name: "Lead_state_idx")
+  @@index([lockedById], name: "Lead_lockedById_idx")
 }
 
 model Call {
   id           String   @id @default(cuid())
-  leadId       String
+  leadId       String?
   twilioSid    String?  @unique
   fromNumber   String
   toNumber     String
@@ -110,10 +114,12 @@ model Call {
   duration     Int      @default(0)
   status       String
   userId       String
-  lead         Lead     @relation(fields: [leadId], references: [id])
+  lead         Lead?    @relation(fields: [leadId], references: [id])
   user         User     @relation(fields: [userId], references: [id])
 
   @@index([fromNumber, createdAt])
+  @@index([leadId], name: "Call_leadId_idx")
+  @@index([userId], name: "Call_userId_idx")
 }
 
 model Callback {
@@ -174,6 +180,8 @@ model NumberPool {
   owner             User?          @relation(fields: [ownerUserId], references: [id])
   conversations     Conversation[]
   lastInteractions  LastInteractionMap[]
+
+  @@index([isActive, regionTag, dailyCount, lastUsedAt], name: "NumberPool_rotation_idx")
 }
 
 model AuditLog {
@@ -315,6 +323,7 @@ model PushSubscription {
 model Campaign {
   id        String   @id @default(cuid())
   name      String
+  region    String   @default("AU") // "AU" | "US"
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   leads     Lead[]

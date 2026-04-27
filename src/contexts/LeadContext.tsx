@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { useNotification } from "@/contexts/NotificationContext";
 import { normalizeToE164 } from "@/lib/phone-utils";
@@ -33,6 +33,8 @@ interface LeadContextType {
     setStats: React.Dispatch<React.SetStateAction<UserStats>>;
     campaignId: string | null;
     setCampaignId: (id: string | null) => void;
+    selectedStates: string[];
+    setSelectedStates: (states: string[]) => void;
 }
 
 const LeadContext = createContext<LeadContextType | undefined>(undefined);
@@ -44,6 +46,15 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     const searchParams = useSearchParams();
 
     const [campaignId, setCampaignId] = useState<string | null>(null);
+    const [selectedStates, setSelectedStates] = useState<string[]>([]);
+
+    // Refs to avoid stale closures in useCallback — always read fresh values
+    const currentLeadRef = useRef(currentLead);
+    currentLeadRef.current = currentLead;
+    const campaignIdRef = useRef(campaignId);
+    campaignIdRef.current = campaignId;
+    const selectedStatesRef = useRef(selectedStates);
+    selectedStatesRef.current = selectedStates;
 
     // Shared Simulation State
     const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -64,33 +75,42 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     // Helper to simulate network delay
     // const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-    const fetchNextLead = async (forcedId?: string) => {
+    const fetchNextLead = useCallback(async (forcedId?: string) => {
+        const lead = currentLeadRef.current;
+        const campaign = campaignIdRef.current;
+        const states = selectedStatesRef.current;
+
         setLoading(true);
-        // Increment calls when fetching next (assuming a dial happened)
-        // In a real app, we'd trigger this explicitly on "Dial", but for this flow it works
-        setStats(prev => ({ ...prev, calls: prev.calls + 1 }));
 
         try {
-            // Push current lead to history before checking new one, if it exists
-            if (currentLead) {
-                setHistory(prev => [...prev, currentLead]);
+            // Push current lead to history (cap at 30 to prevent unbounded growth)
+            if (lead) {
+                setHistory(prev => [...prev.slice(-29), lead]);
             }
 
-            // If we have a current lead that wasn't dispositioned, skip it (release lock)
-            // non-blocking fire-and-forget (or parallel) to speed up navigation
-            if (currentLead && !forcedId) {
-                console.log(`[LeadContext] Releasing lead ${currentLead.id} in background`);
-                fetch(`/api/leads/${currentLead.id}/skip`, { method: "POST" }).catch(e => {
-                    console.error("[LeadContext] Background release failed", e);
-                });
+            // Release current lead's lock (await to prevent race condition)
+            if (lead && !forcedId) {
+                console.log(`[LeadContext] Releasing lead ${lead.id}`);
+                try {
+                    await fetch(`/api/leads/${lead.id}/skip`, { method: "POST" });
+                } catch (e) {
+                    console.error("[LeadContext] Release failed", e);
+                }
             }
 
             try {
                 let url = forcedId ? `/api/lead/next?id=${forcedId}` : "/api/lead/next";
 
-                // Append campaignId if present and no forced ID (or even with forced ID if we want to validate? likely not needed for forced)
-                if (campaignId && !forcedId) {
-                    url += `${url.includes('?') ? '&' : '?'}campaignId=${campaignId}`;
+                if (campaign && !forcedId) {
+                    url += `${url.includes('?') ? '&' : '?'}campaignId=${campaign}`;
+                }
+
+                if (states.length > 0 && !forcedId) {
+                    url += `${url.includes('?') ? '&' : '?'}states=${states.join(',')}`;
+                }
+
+                if (lead && !forcedId) {
+                    url += `${url.includes('?') ? '&' : '?'}skipId=${lead.id}`;
                 }
 
                 console.log(`[LeadContext] Fetching lead via: ${url}`);
@@ -116,7 +136,7 @@ export function LeadProvider({ children }: { children: ReactNode }) {
         } finally {
             setLoading(false);
         }
-    };
+    }, []); // Stable reference — reads fresh values via refs
 
     const fetchPreviousLead = async () => {
         if (history.length === 0) return;
@@ -128,8 +148,9 @@ export function LeadProvider({ children }: { children: ReactNode }) {
         setLoading(false);
     };
 
-    const updateLeadStatus = async (status: string, nextCallAt?: Date, userId?: string, notes?: string, contactData?: Partial<Lead>, customMessage?: string, timezone?: string, includeMeetLink?: boolean, includeCalendarLink?: boolean, meetingTitle?: string) => {
-        if (!currentLead) return;
+    const updateLeadStatus = useCallback(async (status: string, nextCallAt?: Date, userId?: string, notes?: string, contactData?: Partial<Lead>, customMessage?: string, timezone?: string, includeMeetLink?: boolean, includeCalendarLink?: boolean, meetingTitle?: string) => {
+        const lead = currentLeadRef.current;
+        if (!lead) return null;
 
         // Track Demos
         if (status === 'BOOKED') {
@@ -145,22 +166,25 @@ export function LeadProvider({ children }: { children: ReactNode }) {
                 contactData.phoneNumber = normalizeToE164(contactData.phoneNumber);
             }
 
-            await fetch(`/api/leads/${currentLead.id}/status`, {
+            const res = await fetch(`/api/leads/${lead.id}/status`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ status, nextCallAt, userId, notes, contactData, customMessage, timezone, includeMeetLink, includeCalendarLink, meetingTitle }),
             });
 
-            // Update local state if contact data was changed
+            const result = await res.json().catch(() => ({}));
+
             if (contactData) {
                 setCurrentLead(prev => prev ? { ...prev, ...contactData } : null);
             }
 
+            return result?.dispatch || null;
+
         } catch (e) {
             console.error("Failed to update lead status", e);
-            throw e; // Propagate error for UI feedback
+            throw e;
         }
-    };
+    }, []);
 
 
     const addEvent = (event: CalendarEvent) => {
@@ -233,6 +257,17 @@ export function LeadProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [campaignId]);
 
+    // Auto-fetch next lead when state filters change
+    const isInitialStatesRender = useRef(true);
+    useEffect(() => {
+        if (isInitialStatesRender.current) {
+            isInitialStatesRender.current = false;
+            return;
+        }
+        fetchNextLead();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedStates]);
+
     return (
         <LeadContext.Provider value={{
             currentLead,
@@ -245,7 +280,9 @@ export function LeadProvider({ children }: { children: ReactNode }) {
             stats,
             setStats,
             campaignId,
-            setCampaignId
+            setCampaignId,
+            selectedStates,
+            setSelectedStates
         }}>
             {children}
         </LeadContext.Provider>

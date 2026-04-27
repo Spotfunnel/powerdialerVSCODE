@@ -15,7 +15,21 @@ export function normalizeToE164(phoneNumber: string): string {
 
     // Remove all non-digit characters except '+'
     const clean = phoneNumber.replace(/[^\d+]/g, "");
-    const digits = clean.replace(/\D/g, "");
+    let digits = clean.replace(/\D/g, "");
+
+    // Strip duplicated AU country code (e.g. "+61+611800951077" -> "611800951077")
+    if (digits.startsWith('6161')) {
+        digits = digits.substring(2);
+    }
+    // Strip duplicated US country code (e.g. "+1+18504390035" -> "18504390035")
+    if (digits.startsWith('11') && digits.length === 12) {
+        digits = digits.substring(1);
+    }
+
+    // Already in E.164 with country code
+    if (clean.startsWith('+') && digits.length >= 10) {
+        return `+${digits}`;
+    }
 
     // Handle Australian numbers without +61
     // Handle AU Mobile (04... -> +614...)
@@ -36,6 +50,16 @@ export function normalizeToE164(phoneNumber: string): string {
     // If it's already 10 digits and starts with 0 (maybe local AU landline?)
     if (digits.length === 10 && digits.startsWith('0')) {
         return `+61${digits.substring(1)}`;
+    }
+
+    // Handle US numbers: 10 digits starting with 2-9 (no leading 0 or 1)
+    if (digits.length === 10 && /^[2-9]/.test(digits)) {
+        return `+1${digits}`;
+    }
+
+    // Handle US numbers with country code: 1XXXXXXXXXX (11 digits starting with 1)
+    if (digits.length === 11 && digits.startsWith('1') && /^1[2-9]/.test(digits)) {
+        return `+${digits}`;
     }
 
     // If no digits found at all, return empty string (prevents returning just "+")

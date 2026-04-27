@@ -11,19 +11,30 @@ export async function GET(req: Request) {
     }
 
     try {
-        const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+        const lead = await prisma.lead.findUnique({
+            where: { id: leadId },
+            include: { campaign: { select: { region: true } } }
+        });
 
         if (!lead) {
             return new Response("Lead not found", { status: 404 });
         }
 
         const targetUserId = userId || lead.assignedToId;
+        // Region priority: campaign.region > phone country code > undefined
+        const leadCampaignRegion = (lead as { campaign?: { region?: string } | null }).campaign?.region;
+        let region: string | undefined = leadCampaignRegion;
+        if (!region) {
+            if (lead.phoneNumber.startsWith('+1')) region = 'US';
+            else if (lead.phoneNumber.startsWith('+61')) region = 'AU';
+        }
 
-        // Smart rotation: select number with cooldown awareness
+        // Smart rotation: select number with cooldown awareness and region filtering
         const result = await selectOutboundNumber({
             userId: targetUserId || undefined,
             targetNumber: lead.phoneNumber,
-            channel: "CALL"
+            channel: "CALL",
+            region
         });
 
         let callerId = result?.phoneNumber || "";

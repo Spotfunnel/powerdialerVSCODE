@@ -15,9 +15,12 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const forcedId = searchParams.get("id") || undefined;
     const campaignId = searchParams.get("campaignId") || null;
+    const statesParam = searchParams.get("states");
+    const states = statesParam ? statesParam.split(",").filter(Boolean) : null;
+    const skipId = searchParams.get("skipId") || undefined;
 
     try {
-        const lead = await withPrismaRetry(() => getNextLead(userId, forcedId, campaignId), 3, 1000, true);
+        const lead = await withPrismaRetry(() => getNextLead(userId, forcedId, campaignId, states, skipId), 3, 1000, true);
         if (!lead) {
             return NextResponse.json({ message: "No leads ready" }, { status: 404 });
         }

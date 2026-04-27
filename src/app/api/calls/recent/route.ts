@@ -32,17 +32,22 @@ export async function GET(req: Request) {
             }
         });
 
-        const formatted = recentCalls.map(call => ({
-            id: call.id,
-            leadId: call.leadId,
-            leadName: call.lead ? `${call.lead.firstName || ''} ${call.lead.lastName || ''}`.trim() || call.lead.companyName : 'Unknown',
-            companyName: call.lead?.companyName,
-            status: call.status,
-            duration: call.duration,
-            createdAt: call.createdAt,
-            fromNumber: call.fromNumber,
-            toNumber: call.toNumber
-        }));
+        const formatted = recentCalls.map(call => {
+            const contactName = call.lead
+                ? `${call.lead.firstName || ''} ${call.lead.lastName || ''}`.trim() || call.lead.companyName
+                : null;
+            return {
+                id: call.id,
+                leadId: call.leadId,
+                leadName: contactName || call.toNumber || 'Quick Call',
+                companyName: call.lead?.companyName,
+                status: call.status,
+                duration: call.duration,
+                createdAt: call.createdAt,
+                fromNumber: call.fromNumber,
+                toNumber: call.toNumber
+            };
+        });
 
         return NextResponse.json(formatted);
     } catch (error) {

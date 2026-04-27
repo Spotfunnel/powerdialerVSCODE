@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 
 export async function GET() {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
         const campaigns = await prisma.campaign.findMany({
             orderBy: { name: 'asc' },
@@ -16,12 +20,12 @@ export async function GET() {
 
 export async function POST(req: Request) {
     try {
-        const { name } = await req.json();
+        const { name, region } = await req.json();
         if (!name || !name.trim()) {
             return NextResponse.json({ error: "Campaign name is required" }, { status: 400 });
         }
         const campaign = await prisma.campaign.create({
-            data: { name: name.trim() },
+            data: { name: name.trim(), ...(region && { region }) },
             include: { _count: { select: { leads: true } } }
         });
         return NextResponse.json(campaign);
@@ -33,7 +37,7 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
     try {
-        const { id, name } = await req.json();
+        const { id, name, region } = await req.json();
         if (!id) {
             return NextResponse.json({ error: "Campaign ID is required" }, { status: 400 });
         }
@@ -42,7 +46,7 @@ export async function PATCH(req: Request) {
         }
         const campaign = await prisma.campaign.update({
             where: { id },
-            data: { name: name.trim() },
+            data: { name: name.trim(), ...(region && { region }) },
             include: { _count: { select: { leads: true } } }
         });
         return NextResponse.json(campaign);

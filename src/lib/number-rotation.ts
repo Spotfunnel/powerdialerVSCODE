@@ -1,10 +1,20 @@
 import { prisma } from "./prisma";
 
+// Cache settings to avoid hitting DB on every call/SMS (singleton row that rarely changes)
+let _settingsCache: { data: any; expiry: number } | null = null;
+async function getCachedSettings() {
+    if (_settingsCache && Date.now() < _settingsCache.expiry) return _settingsCache.data;
+    const data = await prisma.settings.findUnique({ where: { id: "singleton" } });
+    _settingsCache = { data, expiry: Date.now() + 60_000 }; // 60s TTL
+    return data;
+}
+
 export interface NumberSelectionOptions {
     userId?: string;
     targetNumber?: string;
     channel?: "CALL" | "SMS";
     excludeNumbers?: string[];
+    region?: string; // "AU" | "US" — filters to numbers with matching regionTag
 }
 
 export interface NumberSelectionResult {
@@ -20,10 +30,10 @@ export interface NumberSelectionResult {
 export async function selectOutboundNumber(
     options: NumberSelectionOptions = {}
 ): Promise<NumberSelectionResult | null> {
-    const { userId, targetNumber, channel = "CALL", excludeNumbers = [] } = options;
+    const { userId, targetNumber, channel = "CALL", excludeNumbers = [], region } = options;
 
     try {
-        const settings = await prisma.settings.findUnique({ where: { id: "singleton" } });
+        const settings = await getCachedSettings();
         const hourlyCapLimit = settings?.hourlyNumberCap ?? 10;
         const dailyCapLimit = settings?.dailyNumberCap ?? 50;
         const cooldownMinutes = settings?.numberCooldownMin ?? 120;
@@ -31,7 +41,7 @@ export async function selectOutboundNumber(
 
         const now = new Date();
 
-        // Base filter: active, not in cooldown, under daily cap
+        // Base filter: active, not in cooldown, under daily cap, matching region
         const baseWhere = {
             isActive: true,
             dailyCount: { lt: dailyCapLimit },
@@ -41,7 +51,8 @@ export async function selectOutboundNumber(
             ],
             ...(excludeNumbers.length > 0 && {
                 phoneNumber: { notIn: excludeNumbers }
-            })
+            }),
+            ...(region && { regionTag: region })
         };
 
         // Extract area code from target number for local matching
@@ -92,10 +103,30 @@ export async function selectOutboundNumber(
             if (selected) method = useGlobalPool ? "global-round-robin" : "round-robin";
         }
 
-        // Priority 4: Settings fallback (pool exhausted)
+        // Priority 4: Settings fallback (pool exhausted — only for AU, US has no fallback outside pool)
         if (!selected) {
+            if (region === "US") {
+                console.error(`[Rotation] No US numbers available in pool.`);
+                return null;
+            }
             const fallbackNumber = settings?.twilioFromNumbers?.split(",")[0]?.trim();
             if (fallbackNumber) {
+                // Check if fallback number is also on cooldown in the pool
+                const fallbackPool = await prisma.numberPool.findFirst({
+                    where: { phoneNumber: fallbackNumber },
+                    select: { cooldownUntil: true }
+                });
+                if (fallbackPool?.cooldownUntil && fallbackPool.cooldownUntil > now) {
+                    console.error(`[Rotation] Pool exhausted AND fallback number ${fallbackNumber} is on cooldown until ${fallbackPool.cooldownUntil.toISOString()}. No numbers available.`);
+                    prisma.auditLog.create({
+                        data: {
+                            eventType: "NUMBER_POOL_EXHAUSTED_ALL",
+                            payload: JSON.stringify({ channel, userId, targetNumber, fallbackOnCooldown: true, timestamp: now.toISOString() })
+                        }
+                    }).catch(e => console.error("[Rotation] Audit log fail:", e));
+                    return null;
+                }
+
                 // Log pool exhaustion
                 prisma.auditLog.create({
                     data: {
@@ -110,15 +141,42 @@ export async function selectOutboundNumber(
             return null;
         }
 
-        // Update usage counters
-        await prisma.numberPool.update({
-            where: { id: selected.id },
-            data: { lastUsedAt: now, dailyCount: { increment: 1 } }
+        // Atomic: increment usage + check hourly cap + set cooldown in one transaction
+        // Uses SELECT FOR UPDATE to prevent concurrent requests from double-incrementing
+        await prisma.$transaction(async (tx) => {
+            // Lock the row and increment
+            const updated = await tx.numberPool.update({
+                where: { id: selected!.id },
+                data: { lastUsedAt: now, dailyCount: { increment: 1 } }
+            });
+
+            // Check if hourly cap breached — trigger cooldown immediately
+            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+            const callTableCount = await tx.call.count({
+                where: {
+                    fromNumber: selected!.phoneNumber,
+                    createdAt: { gte: oneHourAgo }
+                }
+            });
+
+            const poolActiveInLastHour = updated.lastUsedAt && updated.lastUsedAt >= oneHourAgo;
+            const estimatedHourlyCount = poolActiveInLastHour
+                ? Math.max(callTableCount, updated.dailyCount)
+                : callTableCount;
+
+            if (estimatedHourlyCount >= hourlyCapLimit) {
+                const cooldownUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000);
+                await tx.numberPool.update({
+                    where: { id: selected!.id },
+                    data: { cooldownUntil }
+                });
+                console.log(`[Rotation] ${selected!.phoneNumber} entered cooldown until ${cooldownUntil.toISOString()} (estimated ${estimatedHourlyCount} calls)`);
+            }
         });
 
-        // Check hourly usage and trigger cooldown if needed (fire-and-forget)
-        triggerCooldownIfNeeded(selected.id, selected.phoneNumber, hourlyCapLimit, cooldownMinutes)
-            .catch(e => console.error("[Rotation] Cooldown check fail:", e));
+        // Health check is less time-critical — keep as fire-and-forget
+        checkNumberHealth(selected.id, selected.phoneNumber, cooldownMinutes)
+            .catch(e => console.error("[Health] Check failed:", e));
 
         console.log(`[Rotation] ${method}: ${selected.phoneNumber} | channel=${channel} | target=${targetNumber || "N/A"}`);
 
@@ -135,53 +193,9 @@ export async function selectOutboundNumber(
 }
 
 /**
- * Checks if a number has exceeded its hourly call limit and puts it in cooldown.
- * Uses NumberPool.dailyCount as primary signal since Call.fromNumber data is unreliable.
+ * Legacy triggerCooldownIfNeeded is now inlined in selectOutboundNumber's transaction.
+ * Cooldown check happens atomically with the usage increment to prevent race conditions.
  */
-async function triggerCooldownIfNeeded(
-    numberId: string,
-    phoneNumber: string,
-    hourlyCapLimit: number,
-    cooldownMinutes: number
-) {
-    // Read the pool record to get reliable dailyCount and lastUsedAt
-    const poolRecord = await prisma.numberPool.findUnique({
-        where: { id: numberId },
-        select: { dailyCount: true, lastUsedAt: true }
-    });
-
-    if (!poolRecord) return;
-
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-
-    // Method 1: Call table count (works when fromNumber is correct)
-    const callTableCount = await prisma.call.count({
-        where: {
-            fromNumber: phoneNumber,
-            createdAt: { gte: oneHourAgo }
-        }
-    });
-
-    // Method 2: If pool was recently active, use dailyCount as hourly estimate
-    // This catches cases where Call records have wrong fromNumber values
-    const poolActiveInLastHour = poolRecord.lastUsedAt && poolRecord.lastUsedAt >= oneHourAgo;
-    const estimatedHourlyCount = poolActiveInLastHour
-        ? Math.max(callTableCount, poolRecord.dailyCount)
-        : callTableCount;
-
-    if (estimatedHourlyCount >= hourlyCapLimit) {
-        const cooldownUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000);
-        await prisma.numberPool.update({
-            where: { id: numberId },
-            data: { cooldownUntil }
-        });
-        console.log(`[Rotation] ${phoneNumber} entered cooldown until ${cooldownUntil.toISOString()} (estimated ${estimatedHourlyCount} calls, callTable=${callTableCount}, poolDaily=${poolRecord.dailyCount})`);
-    }
-
-    // Also check number health (response rate monitoring) — fire-and-forget
-    checkNumberHealth(numberId, phoneNumber, cooldownMinutes)
-        .catch(e => console.error("[Health] Check failed:", e));
-}
 
 /**
  * Checks a number's health based on recent call outcomes.
@@ -205,7 +219,7 @@ async function checkNumberHealth(
     });
 
     const totalCalls = recentCalls.length;
-    if (totalCalls < 10) return;
+    if (totalCalls < 5) return;
 
     const busyCount = recentCalls.filter(c =>
         c.status === "busy" || c.outcome === "BUSY"

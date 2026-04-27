@@ -3,8 +3,9 @@ import { PrismaClient } from "@prisma/client";
 
 import { prisma } from "./prisma";
 import { selectOutboundNumber } from "./number-rotation";
+import { normalizeToE164 } from "./phone-utils";
 
-export async function initiateBridgeCall(leadId: string, userId: string) {
+export async function initiateBridgeCall(leadId: string, userId: string, region?: string) {
     // 1. Fetch settings and user
     const [settings, user, lead] = await Promise.all([
         prisma.settings.findUnique({ where: { id: "singleton" } }),
@@ -18,14 +19,17 @@ export async function initiateBridgeCall(leadId: string, userId: string) {
 
     // ...
 
-    // Default to global from number
-    let fromNumber = settings.twilioFromNumbers.split(",")[0];
-
-    // If pool or custom from number logic is needed, we could add it here.
-    // However, for the BRIDGE call (ringing the rep), we usually want the system number.
-    // For the CALLER ID (what the lead sees), we use the user's rep number if available.
-
-    // We will use user.repPhoneNumber for the LEAD's caller ID later.
+    // Use smart rotation for the bridge call's from number (prevents hammering one number)
+    let fromNumber = settings.twilioFromNumbers.split(",")[0]; // fallback
+    const rotationResult = await selectOutboundNumber({
+        userId,
+        targetNumber: lead?.phoneNumber,
+        channel: "CALL",
+        region
+    });
+    if (rotationResult) {
+        fromNumber = rotationResult.phoneNumber;
+    }
 
     if (!user || !user.repPhoneNumber) {
         throw new Error("Rep phone number not set");
@@ -98,10 +102,10 @@ export async function sendSMS(to: string, body: string) {
     try {
         const client = twilio(settings.twilioAccountSid, settings.twilioAuthToken);
 
-        // Ensure E.164 if possible (AU)
-        let cleanTo = to.replace(/\s+/g, '');
-        if (cleanTo.startsWith('04')) {
-            cleanTo = '+61' + cleanTo.substring(1);
+        // Ensure E.164 (handles AU and US formats, strips double prefixes)
+        const cleanTo = normalizeToE164(to);
+        if (!cleanTo) {
+            return "ERROR_INVALID_TO_NUMBER";
         }
 
         // Smart rotation for sender number

@@ -41,8 +41,7 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
     const ringtoneRef = useRef<HTMLAudioElement | null>(null);
     const deviceRef = useRef<Device | null>(null);
     const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-
-
+    const audioCtxRef = useRef<AudioContext | null>(null);
 
     // --- Audio Context Helpers ---
     const handleRemoteTrack = (track: any) => {
@@ -55,11 +54,14 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
 
     const resumeAudio = async () => {
         try {
-            const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
-            if (AudioContext) {
-                const ctx = new AudioContext();
-                if (ctx.state === 'suspended') {
-                    await ctx.resume();
+            const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+            if (AC) {
+                // Reuse single AudioContext to prevent leak (Chrome limits ~6 per page)
+                if (!audioCtxRef.current) {
+                    audioCtxRef.current = new AC();
+                }
+                if (audioCtxRef.current.state === 'suspended') {
+                    await audioCtxRef.current.resume();
                     console.log("[Twilio] AudioContext Resumed Successfully");
                 }
             }
@@ -245,12 +247,10 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
         const device = deviceRef.current;
         try {
             const identity = (deviceRef.current as any)?._tokenPayload?.identity || null;
-            fetch(`/api/voice/lookup-caller?to=${encodeURIComponent(phoneNumber)}${identity ? `&userId=${identity}` : ""}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.callerId) setOutboundCallerId(data.callerId);
-                })
-                .catch(err => console.error("Failed to lookup caller ID", err));
+            // NOTE: Removed the fire-and-forget /api/voice/lookup-caller call.
+            // It was calling selectOutboundNumber (incrementing dailyCount + triggering cooldown)
+            // BEFORE the real TwiML route also called it — double-counting every dial.
+            // The caller ID is now set from the Call record after the TwiML route runs.
 
             const connection = await device.connect({ params: { To: phoneNumber, userId: identity } });
 

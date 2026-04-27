@@ -28,7 +28,9 @@ export async function GET(req: NextRequest) {
         access_type: "offline", // Crucial for Refresh Token
         scope: scopes,
         include_granted_scopes: true,
-        prompt: "consent" // Force consent to ensure we get a Refresh Token
+        // Force BOTH account picker AND consent so a user can't accidentally connect
+        // the wrong Google account (e.g., whatever they happen to be signed into)
+        prompt: "select_account consent"
     });
 
     return NextResponse.redirect(authorizationUrl);

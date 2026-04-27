@@ -1,29 +1,39 @@
 import { prismaDirect } from "./prisma";
+import { normalizeToE164 } from "./phone-utils";
 
 /**
- * Normalizes a phone number to standard formats for matching.
- * Handles +61, 04, and raw digits.
+ * Returns all plausible stored representations for a phone number so that
+ * historical records (stored in varied formats) can still be matched.
+ * Works for both AU and US numbers.
  */
 export function normalizePhone(phone: string): string[] {
+    if (!phone) return [];
     const digits = phone.replace(/\D/g, "");
+    const e164 = normalizeToE164(phone);
+    const variants = new Set<string>();
 
-    // If it's AU mobile
-    if (digits.startsWith("614") && digits.length === 11) {
-        const local = "0" + digits.substring(2);
-        const e164 = "+" + digits;
-        return [e164, local, digits];
+    if (phone) variants.add(phone);
+    if (digits) variants.add(digits);
+    if (e164) variants.add(e164);
+
+    // AU: +614xxxxxxxx <-> 04xxxxxxxx <-> 614xxxxxxxx
+    if (e164.startsWith("+614") && e164.length === 12) {
+        const local = "0" + e164.substring(3);
+        variants.add(local);
+        variants.add(e164.substring(1)); // 614...
     }
-
     if (digits.startsWith("04") && digits.length === 10) {
-        const e164 = "+61" + digits.substring(1);
-        const raw = "61" + digits.substring(1);
-        return [digits, e164, raw];
+        variants.add("+61" + digits.substring(1));
+        variants.add("61" + digits.substring(1));
     }
 
-    // Default: just return the clean digits and the original if it had a +
-    const variations = [digits];
-    if (phone.startsWith("+")) variations.push(phone);
-    return variations;
+    // US: +1XXXXXXXXXX <-> 1XXXXXXXXXX <-> XXXXXXXXXX
+    if (e164.startsWith("+1") && e164.length === 12) {
+        variants.add(e164.substring(1)); // 1XXXXXXXXXX
+        variants.add(e164.substring(2)); // XXXXXXXXXX
+    }
+
+    return Array.from(variants).filter(Boolean);
 }
 
 /**

@@ -30,14 +30,21 @@ export async function GET(req: Request) {
         const dailyLimit = settings?.dailyNumberCap ?? 100;
 
         // Compute health data for each number
+        // Uses both Call table count AND NumberPool.dailyCount (same as rotation logic)
         const numbersWithHealth = await Promise.all(
             numbers.map(async (num) => {
-                const hourlyCount = await prisma.call.count({
+                const callTableCount = await prisma.call.count({
                     where: {
                         fromNumber: num.phoneNumber,
                         createdAt: { gte: oneHourAgo }
                     }
                 });
+
+                // Match rotation logic: use max of Call table and pool dailyCount
+                const poolActiveInLastHour = num.lastUsedAt && num.lastUsedAt >= oneHourAgo;
+                const hourlyCount = poolActiveInLastHour
+                    ? Math.max(callTableCount, num.dailyCount)
+                    : callTableCount;
 
                 const isResting = num.cooldownUntil ? num.cooldownUntil > now : false;
                 const cooldownRemaining = isResting && num.cooldownUntil

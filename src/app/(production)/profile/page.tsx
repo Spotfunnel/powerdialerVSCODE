@@ -70,6 +70,20 @@ export default async function ProfilePage({ searchParams }: { searchParams: { su
                     <div className="mt-8">
                         {isConnected ? (
                             <div className="space-y-4">
+                                {/* Connected-as display so mismatches are obvious */}
+                                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                                    <p className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-1">Connected Google Account</p>
+                                    <p className="text-lg font-bold text-blue-900">
+                                        {connection.senderEmail || <span className="text-zinc-400">Unknown — reconnect to refresh</span>}
+                                    </p>
+                                    {connection.senderEmail && session.user?.email && connection.senderEmail.toLowerCase() !== (session.user.email as string).toLowerCase() && (
+                                        <p className="text-xs text-amber-700 mt-2 flex items-start gap-1.5">
+                                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                            <span>This doesn&apos;t match your SpotFunnel login ({session.user.email}). Meetings and emails will use <b>{connection.senderEmail}</b>&apos;s calendar. Click &quot;Reconnect&quot; below if this is wrong.</span>
+                                        </p>
+                                    )}
+                                </div>
+
                                 <div className="flex items-center gap-2 text-sm text-green-600">
                                     <CheckCircle2 className="h-4 w-4" />
                                     <span>Calendar Sync Active</span>

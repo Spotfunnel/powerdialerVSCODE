@@ -42,6 +42,19 @@ export async function GET(req: NextRequest) {
         const { tokens } = await oauth2Client.getToken(code);
         oauth2Client.setCredentials(tokens);
 
+        // 2b. Fetch the actual Google account email so we can display it
+        //     (prevents the "connected as the wrong account" confusion)
+        let googleEmail: string | undefined;
+        let googleName: string | undefined;
+        try {
+            const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+            const userinfo = await oauth2.userinfo.get();
+            googleEmail = userinfo.data.email || undefined;
+            googleName = userinfo.data.name || undefined;
+        } catch (e) {
+            console.warn("[Google Integration] Failed to fetch userinfo:", (e as Error).message);
+        }
+
         // 3. Save to Database
         await prisma.calendarConnection.upsert({
             where: { userId: userId },
@@ -49,6 +62,8 @@ export async function GET(req: NextRequest) {
                 accessToken: tokens.access_token!,
                 refreshToken: tokens.refresh_token || undefined, // Only update if present (Google sometimes omits on re-auth)
                 expiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+                senderEmail: googleEmail || undefined,
+                senderName: googleName || undefined,
                 updatedAt: new Date()
             },
             create: {
@@ -56,13 +71,15 @@ export async function GET(req: NextRequest) {
                 provider: "google",
                 accessToken: tokens.access_token!,
                 refreshToken: tokens.refresh_token,
-                expiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined
+                expiry: tokens.expiry_date ? new Date(tokens.expiry_date) : undefined,
+                senderEmail: googleEmail,
+                senderName: googleName
             }
         });
 
-        console.log(`[Google Integration] Successfully connected calendar for user ${session.user.email} (${userId})`);
+        console.log(`[Google Integration] User ${session.user.email} (${userId}) connected Google account: ${googleEmail}`);
 
-        return NextResponse.redirect(`${baseUrl}/profile?success=google_connected`);
+        return NextResponse.redirect(`${baseUrl}/profile?success=google_connected&google=${encodeURIComponent(googleEmail || '')}`);
     } catch (err) {
         console.error("[Google Integration] Auth Callback Failed:", err);
         return NextResponse.redirect(`${baseUrl}/profile?error=internal_server_error`);

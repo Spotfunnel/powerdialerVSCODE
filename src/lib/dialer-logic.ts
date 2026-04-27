@@ -1,30 +1,48 @@
 import { prisma } from "./prisma";
-import { normalizeToE164 } from "./phone-utils";
+import { normalizeToE164, isAustralianLandline } from "./phone-utils";
 import { LeadStatus, LeadStatusType } from "./types";
 import { selectOutboundNumber } from "./number-rotation";
 
-// Helper to strictly format time based on offset number (Nuclear Option against Server Timezone)
-const formatTimeStrict = (date: Date, offsetStr: string | undefined) => {
-    const offset = parseFloat(offsetStr || '11');
-    const targetTime = new Date(date.getTime() + (offset * 3600000));
-    const h = targetTime.getUTCHours();
-    const m = targetTime.getUTCMinutes();
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const formH = h % 12 || 12;
-    const formM = m.toString().padStart(2, '0');
-
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-    const dayName = days[targetTime.getUTCDay()];
-    const monthName = months[targetTime.getUTCMonth()];
-    const dayNum = targetTime.getUTCDate();
-    const year = targetTime.getUTCFullYear();
-
-    return `${dayName}, ${monthName} ${dayNum}, ${year} at ${formH}:${formM} ${ampm}`;
+// Map a timezone offset string (e.g. "11", "-5", "9.5") to an IANA timezone.
+// Uses IANA zones so DST is handled correctly by Intl.DateTimeFormat.
+const OFFSET_TO_IANA: Record<string, string> = {
+    '11': 'Australia/Sydney',
+    '10': 'Australia/Brisbane',
+    '8': 'Australia/Perth',
+    '9.5': 'Australia/Adelaide',
+    '10.5': 'Australia/Adelaide',
+    '13': 'Pacific/Auckland',
+    '12': 'Pacific/Auckland',
+    '-5': 'America/New_York',
+    '-4': 'America/New_York',
+    '-6': 'America/Chicago',
+    '-7': 'America/Denver',
+    '-8': 'America/Los_Angeles',
+    '-9': 'America/Anchorage',
+    '-10': 'Pacific/Honolulu',
 };
 
-export async function getNextLead(userId: string, forcedLeadId?: string, campaignId?: string | null) {
+// Formats a UTC date in a target IANA zone (or offset fallback). DST-safe via Intl.
+const formatTimeStrict = (date: Date, offsetStr: string | undefined) => {
+    const timeZone = OFFSET_TO_IANA[offsetStr || '11'] || 'Australia/Sydney';
+    const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+    });
+    const parts = fmt.formatToParts(date).reduce<Record<string, string>>((acc, p) => {
+        acc[p.type] = p.value;
+        return acc;
+    }, {});
+    return `${parts.weekday}, ${parts.month} ${parts.day}, ${parts.year} at ${parts.hour}:${parts.minute} ${parts.dayPeriod}`;
+};
+
+export async function getNextLead(userId: string, forcedLeadId?: string, campaignId?: string | null, states?: string[] | null, skipId?: string) {
     if (forcedLeadId) {
         // Atomic acquisition of forced lead
         const leads = await prisma.$queryRaw<any[]>`
@@ -57,26 +75,42 @@ export async function getNextLead(userId: string, forcedLeadId?: string, campaig
 
     // 2. ATOMIC ACQUISITION: Find and lock next available lead
     try {
+        // Expand abbreviations to also match full state names
+        const STATE_FULL_NAMES: Record<string, string> = {
+            'NSW': 'New South Wales',
+            'VIC': 'Victoria',
+            'QLD': 'Queensland',
+            'SA': 'South Australia',
+            'WA': 'Western Australia',
+            'TAS': 'Tasmania',
+            'NT': 'Northern Territory',
+            'ACT': 'Australian Capital Territory',
+        };
+        const expandedStates = states && states.length > 0
+            ? [...states, ...states.map(s => STATE_FULL_NAMES[s]).filter(Boolean)]
+            : null;
         const acquiredLeads = await prisma.$queryRaw<any[]>`
             UPDATE "Lead"
-            SET 
-                status = 'LOCKED', 
-                "lockedById" = ${userId}, 
+            SET
+                status = 'LOCKED',
+                "lockedById" = ${userId},
                 "lockedAt" = NOW(),
                 "updatedAt" = NOW()
             WHERE id = (
-                SELECT id 
-                FROM "Lead" 
-                WHERE 
+                SELECT id
+                FROM "Lead"
+                WHERE
                     (status = 'READY' OR (status = 'CALLBACK' AND "nextCallAt" <= NOW()))
                     AND "lockedById" IS NULL
                     AND (${campaignId}::text IS NULL OR "campaignId" = ${campaignId})
-                ORDER BY 
+                    AND (${expandedStates}::text[] IS NULL OR "state" = ANY(${expandedStates}::text[]))
+                    AND (${skipId || null}::text IS NULL OR id != ${skipId || null})
+                ORDER BY
                     CASE WHEN status = 'CALLBACK' THEN 0 ELSE 1 END ASC,
                     priority ASC,
                     "nextCallAt" ASC NULLS LAST,
                     "attempts" ASC,
-                    "createdAt" ASC
+                    "updatedAt" ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
@@ -238,18 +272,37 @@ export async function updateLeadDisposition(
 
     if (status === 'BOOKED' && nextCallAt) {
         const tzMapping: Record<string, { iana: string, region: string }> = {
+            // Australia
             '11': { iana: 'Australia/Sydney', region: 'Sydney, Australia' },
             '10': { iana: 'Australia/Brisbane', region: 'Brisbane, Australia' },
             '8': { iana: 'Australia/Perth', region: 'Perth, Australia' },
             '9.5': { iana: 'Australia/Adelaide', region: 'Adelaide, Australia' },
-            '10.5': { iana: 'Australia/Adelaide', region: 'Adelaide, Australia' }, // Summer 10.5
+            '10.5': { iana: 'Australia/Adelaide', region: 'Adelaide, Australia' },
+            // New Zealand
             '13': { iana: 'Pacific/Auckland', region: 'Auckland, New Zealand' },
-            '12': { iana: 'Pacific/Auckland', region: 'Auckland, New Zealand' }, // Winter 12
+            '12': { iana: 'Pacific/Auckland', region: 'Auckland, New Zealand' },
+            // United States
+            '-5': { iana: 'America/New_York', region: 'Eastern Time (US)' },
+            '-4': { iana: 'America/New_York', region: 'Eastern Time (US, DST)' },
+            '-6': { iana: 'America/Chicago', region: 'Central Time (US)' },
+            '-5cdt': { iana: 'America/Chicago', region: 'Central Time (US, DST)' },
+            '-7': { iana: 'America/Denver', region: 'Mountain Time (US)' },
+            '-6mdt': { iana: 'America/Denver', region: 'Mountain Time (US, DST)' },
+            '-8': { iana: 'America/Los_Angeles', region: 'Pacific Time (US)' },
+            '-7pdt': { iana: 'America/Los_Angeles', region: 'Pacific Time (US, DST)' },
+            '-9': { iana: 'America/Anchorage', region: 'Alaska Time' },
+            '-10': { iana: 'Pacific/Honolulu', region: 'Hawaii Time' },
         };
 
         const tzData = tzMapping[timezone || '11'] || tzMapping['11'];
         const ianaTimeZone = tzData.iana;
         const regionLabel = tzData.region;
+
+        // Build a safe display name (never "undefined")
+        const displayName =
+            lead.companyName?.trim() ||
+            [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim() ||
+            'Client';
 
         // 1. Create Meeting in DB
         const meeting = await prisma.meeting.create({
@@ -258,7 +311,7 @@ export async function updateLeadDisposition(
                 userId: userId,
                 startAt: new Date(nextCallAt),
                 endAt: new Date(new Date(nextCallAt).getTime() + 30 * 60 * 1000),
-                title: meetingTitle || `Demo: ${lead.companyName || lead.firstName}`,
+                title: meetingTitle || `Demo: ${displayName}`,
                 provider: 'PENDING'
             }
         });
@@ -289,7 +342,7 @@ export async function updateLeadDisposition(
         if (deps.createGoogleMeeting) {
             const createMeeting = deps.createGoogleMeeting;
             const sendSms = deps.sendSMS;
-            const clientName = lead.companyName || (lead.firstName ? `${lead.firstName} ${lead.lastName || ''}`.trim() : 'New Client');
+            const clientName = displayName;
             const eventTitle = meetingTitle || `Spotfunnel x ${clientName}`;
 
             let googleEvent: any = null;
@@ -330,7 +383,7 @@ SpotFunnel Demo`,
                     attendees: Array.from(new Set([
                         ...(lead.email ? [lead.email.toLowerCase()] : []),
                         ...(user?.email ? [user.email.toLowerCase()] : []),
-                        'leo@getspotfunnel.com'
+                        ...(process.env.ADMIN_ATTENDEE_EMAIL ? [process.env.ADMIN_ATTENDEE_EMAIL.toLowerCase()] : []),
                     ])).map(email => ({ email })),
                     repName: user?.name || 'SpotFunnel Specialist',
                     timeZone: ianaTimeZone,
@@ -369,22 +422,30 @@ SpotFunnel Demo`,
 
             // --- SMS Dispatch ---
             try {
-                if (sendSms && lead.phoneNumber) {
-                    let smsBody = finalMessage || `Hi ${lead.firstName}, confirming our demo!`;
+                if (sendSms && lead.phoneNumber && !isAustralianLandline(normalizeToE164(lead.phoneNumber))) {
+                    // Null-safe greeting — prefer firstName, fall back to displayName, never "undefined"
+                    const greetingName = lead.firstName?.trim() || displayName;
+                    let smsBody = finalMessage || `Hi ${greetingName}, confirming our demo!`;
 
-                    if (includeMeetLink && googleEvent?.meetingUrl) {
-                        if (smsBody.includes('[LINK]')) {
-                            smsBody = smsBody.replace('[LINK]', googleEvent.meetingUrl);
+                    // Only include meet/calendar links if Google sync actually succeeded
+                    const calendarSynced = dispatchResult.calendar === 'sent';
+
+                    if (includeMeetLink) {
+                        if (calendarSynced && googleEvent?.meetingUrl) {
+                            if (smsBody.includes('[LINK]')) smsBody = smsBody.replace('[LINK]', googleEvent.meetingUrl);
+                            else smsBody = `${smsBody} ${googleEvent.meetingUrl}`;
                         } else {
-                            smsBody = `${smsBody} ${googleEvent.meetingUrl}`;
+                            // Strip unresolved placeholder rather than send "[LINK]" literally
+                            smsBody = smsBody.replace(/\s*\[LINK\]/g, '').trim();
                         }
                     }
 
-                    if (includeCalendarLink && googleEvent?.calendarUrl) {
-                        if (smsBody.includes('[CAL_LINK]')) {
-                            smsBody = smsBody.replace('[CAL_LINK]', googleEvent.calendarUrl);
+                    if (includeCalendarLink) {
+                        if (calendarSynced && googleEvent?.calendarUrl) {
+                            if (smsBody.includes('[CAL_LINK]')) smsBody = smsBody.replace('[CAL_LINK]', googleEvent.calendarUrl);
+                            else smsBody = `${smsBody} ${googleEvent.calendarUrl}`;
                         } else {
-                            smsBody = `${smsBody} ${googleEvent.calendarUrl}`;
+                            smsBody = smsBody.replace(/\s*\[CAL_LINK\]/g, '').trim();
                         }
                     }
 
@@ -407,6 +468,16 @@ SpotFunnel Demo`,
                             content: `Automated booking SMS dispatched from ${actualFrom || 'smart-rotation'}.`
                         }
                     }).catch(e => console.error("[DL] Activity log fail:", e));
+                } else if (sendSms && lead.phoneNumber && isAustralianLandline(normalizeToE164(lead.phoneNumber))) {
+                    dispatchResult.sms = 'blocked-landline';
+                    await prisma.leadActivity.create({
+                        data: {
+                            leadId: lead.id,
+                            userId: userId,
+                            type: "SYSTEM",
+                            content: `Booking SMS skipped: ${lead.phoneNumber} is an Australian landline (cannot receive SMS). Calendar invite sent via email.`
+                        }
+                    }).catch(e => console.error("[DL] Activity log fail:", e));
                 }
             } catch (smsError) {
                 console.error("[DL] SMS Failed", smsError);
@@ -422,11 +493,12 @@ SpotFunnel Demo`,
                 }).catch(e => console.error("[DL] Activity log fail:", e));
             }
 
-        } else if (deps.sendSMS && lead.phoneNumber) {
+        } else if (deps.sendSMS && lead.phoneNumber && !isAustralianLandline(normalizeToE164(lead.phoneNumber))) {
             // Fallback: Just SMS if no meeting logic
             const sendSms = deps.sendSMS;
             try {
-                const smsBody = finalMessage || `Hi ${lead.firstName}, confirming our demo!`;
+                const greetingName = lead.firstName?.trim() || displayName;
+                const smsBody = finalMessage || `Hi ${greetingName}, confirming our demo!`;
                 const actualFrom = await resolveFromNumber();
 
                 await sendSms({
@@ -442,6 +514,8 @@ SpotFunnel Demo`,
                 dispatchResult.sms = 'failed';
                 dispatchResult.smsError = smsError instanceof Error ? smsError.message : String(smsError);
             }
+        } else if (deps.sendSMS && lead.phoneNumber && isAustralianLandline(normalizeToE164(lead.phoneNumber))) {
+            dispatchResult.sms = 'blocked-landline';
         }
     }
 

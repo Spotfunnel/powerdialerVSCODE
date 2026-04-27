@@ -46,6 +46,10 @@ next-env.d.ts
 .tmp-private-key.txt
 .tmp-public-key.txt
 
+# agent / tooling state
+.claude/
+.playwright-mcp/
+
 # data files (never commit PII/lead data)
 *.csv
 

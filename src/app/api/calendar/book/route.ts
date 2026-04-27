@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { updateLeadDisposition } from "@/lib/dialer-logic";
+import { normalizePhone } from "@/lib/leads";
 
 export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
@@ -27,13 +28,11 @@ export async function POST(req: Request) {
             const conditions: any[] = [];
 
             if (phone) {
-                const cleaned = phone.replace(/[\s\-\(\)]/g, "");
-                const variants = [cleaned];
-                // simple AU logic
-                if (cleaned.startsWith('0')) variants.push(cleaned.replace(/^0/, '+61'));
-                if (cleaned.startsWith('+61')) variants.push(cleaned.replace(/^\+61/, '0'));
-
-                conditions.push({ phoneNumber: { in: variants } });
+                // Shared normalizer generates AU + US variants
+                const variants = normalizePhone(phone);
+                if (variants.length > 0) {
+                    conditions.push({ phoneNumber: { in: variants } });
+                }
             }
 
             if (email) {

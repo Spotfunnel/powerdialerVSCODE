@@ -15,11 +15,33 @@ export async function POST(req: Request) {
         // Extract userId from client identity
         const userId = fromClient.startsWith('client:') ? fromClient.replace('client:', '') : undefined;
 
-        // Smart rotation: select number with cooldown awareness
+        // Region resolution priority:
+        //   1. Lead's campaign.region (most authoritative)
+        //   2. Target number's country code (+1 => US, +61 => AU)
+        //   3. Default to AU only if number looks AU-formatted
+        let region: string | undefined = undefined;
+        if (to) {
+            const lead = await prisma.lead.findFirst({
+                where: { phoneNumber: to },
+                select: { campaign: { select: { region: true } } }
+            });
+            const campaignRegion = (lead?.campaign as { region?: string } | null | undefined)?.region;
+            if (campaignRegion) {
+                region = campaignRegion;
+            } else if (to.startsWith('+1')) {
+                region = 'US';
+            } else if (to.startsWith('+61')) {
+                region = 'AU';
+            }
+            // If region is still undefined, rotation will fall back to any available number
+        }
+
+        // Smart rotation: select number with cooldown awareness and region filtering
         const result = await selectOutboundNumber({
             userId,
             targetNumber: to,
-            channel: "CALL"
+            channel: "CALL",
+            region
         });
 
         let callerId = result?.phoneNumber || "";
@@ -30,12 +52,6 @@ export async function POST(req: Request) {
             callerId = settings?.twilioFromNumbers?.split(',')[0]?.trim() || "";
         }
 
-        // Normalize Caller ID
-        if (callerId && !callerId.startsWith('+')) {
-            if (callerId.startsWith('0')) callerId = '+61' + callerId.substring(1);
-            else callerId = '+61' + callerId;
-        }
-
         if (!to) {
             response.say("Invalid number.");
             return new NextResponse(response.toString(), { headers: { "Content-Type": "text/xml" } });
@@ -44,11 +60,14 @@ export async function POST(req: Request) {
         // Dialing Logic
         const dial = response.dial({ callerId });
 
-        // Normalize Target Number
+        // Normalize Target Number (handle both AU and US)
         let target = to;
         if (!target.startsWith('+') && !target.startsWith('client:')) {
-            if (target.startsWith('0')) target = '+61' + target.substring(1);
-            else target = '+61' + target;
+            const digits = target.replace(/\D/g, '');
+            if (digits.startsWith('0')) target = '+61' + digits.substring(1);
+            else if (digits.length === 10 && /^[2-9]/.test(digits)) target = '+1' + digits;
+            else if (digits.length === 11 && digits.startsWith('1')) target = '+' + digits;
+            else target = '+' + digits;
         }
 
         if (target.startsWith('client:')) {
@@ -57,21 +76,21 @@ export async function POST(req: Request) {
             dial.number(target);
         }
 
-        // Audit Log (Async)
+        // Audit Log (Async) — log every outbound call, attach to a Lead if one matches.
+        // Quick-call dials with no matching Lead are logged with leadId: null so they
+        // still appear in recent-calls history.
         if (userId) {
             prisma.lead.findFirst({ where: { phoneNumber: to } }).then(lead => {
-                if (lead) {
-                    prisma.call.create({
-                        data: {
-                            userId,
-                            fromNumber: callerId,
-                            toNumber: to,
-                            direction: 'OUTBOUND',
-                            status: 'initiated',
-                            leadId: lead.id,
-                        }
-                    }).catch(e => console.error("[TwiML] Call Log Error:", e));
-                }
+                prisma.call.create({
+                    data: {
+                        userId,
+                        fromNumber: callerId,
+                        toNumber: to,
+                        direction: 'OUTBOUND',
+                        status: 'initiated',
+                        leadId: lead?.id ?? null,
+                    }
+                }).catch(e => console.error("[TwiML] Call Log Error:", e));
             });
         }
 

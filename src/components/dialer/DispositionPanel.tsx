@@ -218,9 +218,32 @@ export function DispositionPanel() {
             setBookingStep('processing');
 
             // Pass the captured protocol data back to the lead status update
-            await handleDisposition('BOOKED', date, selectedRep.id, { ...bookingData, customMessage });
+            const dispatch = await handleDisposition('BOOKED', date, selectedRep.id, { ...bookingData, customMessage });
 
             setBookingStep('done');
+
+            // Surface dispatch failures to rep
+            if (dispatch?.calendar === 'failed') {
+                addNotification({
+                    type: 'error',
+                    title: 'Calendar Sync Failed',
+                    message: `Meeting saved but Google Calendar sync failed: ${dispatch.calendarError || 'Unknown error'}. Check Google connection in Profile.`
+                });
+            }
+            if (dispatch?.sms === 'failed') {
+                addNotification({
+                    type: 'error',
+                    title: 'SMS Failed',
+                    message: `Meeting booked but SMS confirmation failed: ${dispatch.smsError || 'Unknown error'}. Calendar invite was sent via email.`
+                });
+            }
+            if (dispatch?.sms === 'blocked-landline') {
+                addNotification({
+                    type: 'info',
+                    title: 'SMS Skipped — Landline',
+                    message: `${bookingData.firstName}'s number is a landline. Calendar invite sent via email only.`
+                });
+            }
 
             // Show premium success banner
             addNotification({
@@ -241,21 +264,16 @@ export function DispositionPanel() {
         // Only block if trying to set CALLBACK/BOOKED without a date (initial button click)
         if (status === 'CALLBACK' && !nextCallAt) {
             setShowSchedule("callback");
-            return;
+            return null;
         }
         if (status === 'BOOKED' && !nextCallAt) {
             setShowSchedule("booking");
             setBookingStep('details');
-            return;
+            return null;
         }
 
         // Optimistic UI update
         setSubmittedStatus(status);
-
-        // Immediate Auto-Skip for non-booking outcomes
-        if (status !== 'BOOKED') {
-            fetchNextLead();
-        }
 
         // data can be contactData OR include customMessage
         const contactData = data?.customMessage ? {
@@ -268,7 +286,13 @@ export function DispositionPanel() {
         const customMessage = data?.customMessage;
 
         try {
-            updateLeadStatus(status, nextCallAt, userId, notes, contactData, customMessage, timezoneOffset.toString(), includeMeetLink, includeCalendarLink, meetingTitle);
+            const dispatch = await updateLeadStatus(status, nextCallAt, userId, notes, contactData, customMessage, timezoneOffset.toString(), includeMeetLink, includeCalendarLink, meetingTitle);
+
+            // Auto-skip AFTER status update succeeds (prevents lost notes/outcomes)
+            if (status !== 'BOOKED') {
+                fetchNextLead();
+            }
+            return dispatch;
         } catch (err: any) {
             console.error("Disposition Refused", err);
             addNotification({
@@ -276,6 +300,7 @@ export function DispositionPanel() {
                 title: 'Protocol Failed',
                 message: "System Disconnected. Check uplink status."
             });
+            return null;
         }
     };
 
@@ -736,7 +761,15 @@ export function DispositionPanel() {
                                         onClick={() => {
                                             const d = (document.getElementById('callback-date') as HTMLInputElement).value;
                                             const t = (document.getElementById('callback-time') as HTMLInputElement).value;
-                                            if (d && t) handleSchedule(0, "callback", new Date(`${d}T${t}`));
+                                            if (d && t) {
+                                                // Convert the selected time from the lead's timezone to UTC
+                                                // The rep picks a time in the lead's timezone (timezoneOffset from UTC)
+                                                const localDate = new Date(`${d}T${t}`);
+                                                const browserOffsetMs = localDate.getTimezoneOffset() * -60 * 1000;
+                                                const targetOffsetMs = timezoneOffset * 3600 * 1000;
+                                                const adjusted = new Date(localDate.getTime() - targetOffsetMs + browserOffsetMs);
+                                                handleSchedule(0, "callback", adjusted);
+                                            }
                                         }}
                                         className="flex-1 py-3.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-black uppercase tracking-widest text-[10px] transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2"
                                     >

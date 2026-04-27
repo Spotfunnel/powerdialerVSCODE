@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { prisma, withPrismaRetry } from "@/lib/prisma";
+import { normalizeToE164 } from "@/lib/phone-utils";
 
 export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
@@ -35,13 +36,32 @@ export async function GET(req: Request) {
         }
 
         if (search) {
-            where.OR = [
+            // If search looks like a phone number (has digits), also try digit-only matching
+            const searchDigits = search.replace(/\D/g, '');
+            const isPhoneSearch = searchDigits.length >= 4;
+
+            const conditions: Prisma.LeadWhereInput[] = [
                 { companyName: { contains: search, mode: 'insensitive' } },
                 { firstName: { contains: search, mode: 'insensitive' } },
                 { lastName: { contains: search, mode: 'insensitive' } },
-                { phoneNumber: { contains: search, mode: 'insensitive' } },
                 { email: { contains: search, mode: 'insensitive' } },
+                { phoneNumber: { contains: search, mode: 'insensitive' } },
             ];
+
+            // Fuzzy phone: strip formatting and match on digits only
+            // e.g. "2 4853 9408" matches "+61248539408", "04 2222 3333" matches "+61422223333"
+            if (isPhoneSearch) {
+                conditions.push({ phoneNumber: { contains: searchDigits } });
+                // Also try with +61 or +1 prefix stripped from search
+                if (searchDigits.startsWith('61')) {
+                    conditions.push({ phoneNumber: { contains: searchDigits.substring(2) } });
+                }
+                if (searchDigits.startsWith('0')) {
+                    conditions.push({ phoneNumber: { contains: searchDigits.substring(1) } });
+                }
+            }
+
+            where.OR = conditions;
         }
 
         console.log(`[CRM] Fetching leads page=${page} q="${search}" status=${status}`);
@@ -67,6 +87,11 @@ export async function GET(req: Request) {
                         priority: true,
                         createdAt: true,
                         campaignId: true,
+                        suburb: true,
+                        state: true,
+                        industry: true,
+                        website: true,
+                        notes: true,
                         campaign: { select: { id: true, name: true } },
                         assignedTo: {
                             select: {
@@ -104,10 +129,10 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Phone number is required" }, { status: 400 });
         }
 
-        if (phoneNumber && phoneNumber.startsWith('0')) {
-            phoneNumber = '+61' + phoneNumber.substring(1);
-        } else if (phoneNumber && !phoneNumber.startsWith('+')) {
-            phoneNumber = '+61' + phoneNumber;
+        // Use shared normalizer to handle AU/US formats and strip malformed input (double prefixes, spaces)
+        phoneNumber = normalizeToE164(phoneNumber);
+        if (!phoneNumber) {
+            return NextResponse.json({ error: "Invalid phone number format" }, { status: 400 });
         }
 
         // Sanitize empty strings to undefined to avoid unique constraint violations

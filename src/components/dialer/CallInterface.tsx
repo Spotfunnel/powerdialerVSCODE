@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Phone, PhoneOff, Mic, MicOff, Loader2, Building2, AlertCircle, Globe, ExternalLink, History, Clock, CheckCircle2, CassetteTape } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Phone, PhoneOff, Mic, MicOff, Loader2, Building2, AlertCircle, Globe, ExternalLink, History, Clock, CheckCircle2, CassetteTape, MapPin, Zap, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLead } from "@/contexts/LeadContext";
 import { useTwilio } from "@/contexts/TwilioContext";
@@ -9,10 +9,11 @@ import { useRouter } from "next/navigation";
 import { MessageSquare } from "lucide-react";
 import { useNotification } from "@/contexts/NotificationContext";
 import { useSwipeable } from "react-swipeable";
+import { normalizeToE164 } from "@/lib/phone-utils";
 
 export function CallInterface({ onToggleMessages, showMessages }: { onToggleMessages?: () => void; showMessages?: boolean }) {
     const router = useRouter();
-    const { currentLead, updateLeadStatus, events, addEvent, setStats, loading, campaignId, setCampaignId, fetchNextLead } = useLead();
+    const { currentLead, updateLeadStatus, events, addEvent, setStats, loading, campaignId, setCampaignId, fetchNextLead, selectedStates, setSelectedStates } = useLead();
     const { addNotification } = useNotification();
     const [sendingLink, setSendingLink] = useState(false);
 
@@ -36,6 +37,64 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
     const [recentCalls, setRecentCalls] = useState<any[]>([]);
     const [showHistory, setShowHistory] = useState(false);
     const [leadHistory, setLeadHistory] = useState<any[]>([]);
+    const [showStateFilter, setShowStateFilter] = useState(false);
+    const [showQuickCall, setShowQuickCall] = useState(false);
+    const [quickCallNumber, setQuickCallNumber] = useState('');
+    const [quickCalling, setQuickCalling] = useState(false);
+    const quickCallInputRef = useRef<HTMLInputElement>(null);
+
+    const AUSTRALIAN_STATES = [
+        { code: 'NSW', label: 'NSW', tz: '11+' },
+        { code: 'VIC', label: 'VIC', tz: '11+' },
+        { code: 'QLD', label: 'QLD', tz: '10+' },
+        { code: 'SA', label: 'SA', tz: '10.5+' },
+        { code: 'WA', label: 'WA', tz: '8+' },
+        { code: 'TAS', label: 'TAS', tz: '11+' },
+        { code: 'NT', label: 'NT', tz: '9.5+' },
+        { code: 'ACT', label: 'ACT', tz: '11+' },
+    ];
+
+    const US_STATES = [
+        { code: 'AL', label: 'AL', tz: '-6' }, { code: 'AK', label: 'AK', tz: '-9' },
+        { code: 'AZ', label: 'AZ', tz: '-7' }, { code: 'AR', label: 'AR', tz: '-6' },
+        { code: 'CA', label: 'CA', tz: '-8' }, { code: 'CO', label: 'CO', tz: '-7' },
+        { code: 'CT', label: 'CT', tz: '-5' }, { code: 'DE', label: 'DE', tz: '-5' },
+        { code: 'FL', label: 'FL', tz: '-5' }, { code: 'GA', label: 'GA', tz: '-5' },
+        { code: 'HI', label: 'HI', tz: '-10' }, { code: 'ID', label: 'ID', tz: '-7' },
+        { code: 'IL', label: 'IL', tz: '-6' }, { code: 'IN', label: 'IN', tz: '-5' },
+        { code: 'IA', label: 'IA', tz: '-6' }, { code: 'KS', label: 'KS', tz: '-6' },
+        { code: 'KY', label: 'KY', tz: '-5' }, { code: 'LA', label: 'LA', tz: '-6' },
+        { code: 'ME', label: 'ME', tz: '-5' }, { code: 'MD', label: 'MD', tz: '-5' },
+        { code: 'MA', label: 'MA', tz: '-5' }, { code: 'MI', label: 'MI', tz: '-5' },
+        { code: 'MN', label: 'MN', tz: '-6' }, { code: 'MS', label: 'MS', tz: '-6' },
+        { code: 'MO', label: 'MO', tz: '-6' }, { code: 'MT', label: 'MT', tz: '-7' },
+        { code: 'NE', label: 'NE', tz: '-6' }, { code: 'NV', label: 'NV', tz: '-8' },
+        { code: 'NH', label: 'NH', tz: '-5' }, { code: 'NJ', label: 'NJ', tz: '-5' },
+        { code: 'NM', label: 'NM', tz: '-7' }, { code: 'NY', label: 'NY', tz: '-5' },
+        { code: 'NC', label: 'NC', tz: '-5' }, { code: 'ND', label: 'ND', tz: '-6' },
+        { code: 'OH', label: 'OH', tz: '-5' }, { code: 'OK', label: 'OK', tz: '-6' },
+        { code: 'OR', label: 'OR', tz: '-8' }, { code: 'PA', label: 'PA', tz: '-5' },
+        { code: 'RI', label: 'RI', tz: '-5' }, { code: 'SC', label: 'SC', tz: '-5' },
+        { code: 'SD', label: 'SD', tz: '-6' }, { code: 'TN', label: 'TN', tz: '-6' },
+        { code: 'TX', label: 'TX', tz: '-6' }, { code: 'UT', label: 'UT', tz: '-7' },
+        { code: 'VT', label: 'VT', tz: '-5' }, { code: 'VA', label: 'VA', tz: '-5' },
+        { code: 'WA', label: 'WA', tz: '-8' }, { code: 'WV', label: 'WV', tz: '-5' },
+        { code: 'WI', label: 'WI', tz: '-6' }, { code: 'WY', label: 'WY', tz: '-7' },
+        { code: 'DC', label: 'DC', tz: '-5' },
+    ];
+
+    // Determine region from selected campaign
+    const selectedCampaign = campaigns.find(c => c.id === campaignId);
+    const campaignRegion = selectedCampaign?.region || 'AU';
+    const STATES = campaignRegion === 'US' ? US_STATES : AUSTRALIAN_STATES;
+
+    const toggleState = (code: string) => {
+        setSelectedStates(
+            selectedStates.includes(code)
+                ? selectedStates.filter(s => s !== code)
+                : [...selectedStates, code]
+        );
+    };
 
     const fetchRecentCalls = async () => {
         try {
@@ -171,6 +230,33 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
         }
     };
 
+    const handleQuickCall = async () => {
+        const e164 = normalizeToE164(quickCallNumber);
+        if (!e164 || !isSystemReady || quickCalling) return;
+        setQuickCalling(true);
+        setLocalCallState('dialing');
+        try {
+            await dial(e164);
+            setStats(prev => ({ ...prev, calls: (prev.calls || 0) + 1 }));
+            setShowQuickCall(false);
+            setQuickCallNumber('');
+        } catch (e) {
+            console.error("Quick dial error suppressed:", e);
+            setLocalCallState('idle');
+        } finally {
+            setQuickCalling(false);
+        }
+    };
+
+    // Auto-focus input when panel opens
+    useEffect(() => {
+        if (showQuickCall) {
+            // small delay so the input is mounted before we focus
+            const t = setTimeout(() => quickCallInputRef.current?.focus(), 50);
+            return () => clearTimeout(t);
+        }
+    }, [showQuickCall]);
+
     const [droppingVm, setDroppingVm] = useState(false);
 
     const handleVmDrop = async () => {
@@ -254,10 +340,19 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement;
-            if (
+            const inField =
                 ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
-                target.isContentEditable
-            ) return;
+                target.isContentEditable;
+
+            // ESC closes the quick-call panel even when focused inside its input
+            if (e.code === 'Escape' && showQuickCall) {
+                e.preventDefault();
+                setShowQuickCall(false);
+                setQuickCallNumber('');
+                return;
+            }
+
+            if (inField) return;
 
             // Ignore modifiers to prevent conflicts
             if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -275,10 +370,16 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                 console.log("Hangup shortcut triggered");
                 hangup();
             }
+
+            if (e.code === 'KeyQ') {
+                if (isConnected || isIncoming || localCallState !== 'idle') return;
+                e.preventDefault();
+                setShowQuickCall(prev => !prev);
+            }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isConnected, isIncoming, localCallState, isSystemReady, currentLead]);
+    }, [isConnected, isIncoming, localCallState, isSystemReady, currentLead, showQuickCall]);
 
 
 
@@ -343,6 +444,7 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                         value={campaignId || ""}
                         onChange={(e) => {
                             setCampaignId(e.target.value || null);
+                            setSelectedStates([]); // Clear state filters when campaign changes (region may differ)
                         }}
                         className="bg-transparent text-[11px] font-black uppercase tracking-widest text-zinc-700 border-none outline-none cursor-pointer hover:text-teal-600 focus:ring-0 py-0 pl-0 pr-6"
                     >
@@ -353,6 +455,64 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                             </option>
                         ))}
                     </select>
+                </div>
+
+                {/* STATE FILTER */}
+                <div className="flex flex-col gap-1.5">
+                    <button
+                        onClick={() => setShowStateFilter(!showStateFilter)}
+                        className={cn(
+                            "flex items-center gap-2 bg-white/80 backdrop-blur-sm px-3 py-2 rounded-xl border border-zinc-200/50 shadow-sm transition-all hover:bg-white/95",
+                            selectedStates.length > 0 && "border-teal-300/60 bg-teal-50/40"
+                        )}
+                    >
+                        <MapPin className="h-4 w-4 text-teal-600 shrink-0" />
+                        <span className="text-[11px] font-black uppercase tracking-widest text-zinc-700">
+                            {selectedStates.length > 0
+                                ? selectedStates.join(', ')
+                                : 'All States'}
+                        </span>
+                        {selectedStates.length > 0 && (
+                            <span className="text-[9px] font-bold text-teal-600 bg-teal-100 px-1.5 py-0.5 rounded-full">
+                                {selectedStates.length}
+                            </span>
+                        )}
+                    </button>
+
+                    {showStateFilter && (
+                        <div className="flex flex-col gap-1 bg-white/95 backdrop-blur-md rounded-xl border border-zinc-200/50 shadow-lg p-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                            {STATES.map(({ code, label, tz }) => (
+                                <label
+                                    key={code}
+                                    className={cn(
+                                        "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition-all hover:bg-teal-50/60",
+                                        selectedStates.includes(code) && "bg-teal-50/80"
+                                    )}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedStates.includes(code)}
+                                        onChange={() => toggleState(code)}
+                                        className="h-3.5 w-3.5 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 focus:ring-1 cursor-pointer"
+                                    />
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-zinc-700 flex-1">
+                                        {label}
+                                    </span>
+                                    <span className="text-[9px] font-bold text-zinc-400 font-mono">
+                                        {tz}
+                                    </span>
+                                </label>
+                            ))}
+                            {selectedStates.length > 0 && (
+                                <button
+                                    onClick={() => setSelectedStates([])}
+                                    className="text-[9px] font-bold text-zinc-400 hover:text-red-500 uppercase tracking-widest mt-1 py-1 transition-colors"
+                                >
+                                    Clear All
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* LEAD SPECIFIC HISTORY LOG - Standalone barely visible cards */}
@@ -411,6 +571,87 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                     </div>
                 )}
             </div>
+
+            {/* QUICK CALL (Top Right, sits above the system status indicator) */}
+            {!isConnected && !isIncoming && (
+                <div className="absolute top-6 right-2 z-30 flex flex-col items-end gap-2">
+                    <button
+                        onClick={() => setShowQuickCall(prev => !prev)}
+                        disabled={localCallState !== 'idle'}
+                        className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-sm border",
+                            showQuickCall
+                                ? "bg-teal-600 text-white border-teal-600 shadow-teal-500/20"
+                                : "bg-white/80 text-zinc-600 hover:bg-white border-zinc-200 hover:text-teal-700 backdrop-blur-sm"
+                        )}
+                        title="Quick call (Q)"
+                    >
+                        {showQuickCall ? <X className="h-3 w-3 stroke-[3]" /> : <Zap className="h-3 w-3 stroke-[3]" />}
+                        <span>Quick Call</span>
+                        {!showQuickCall && (
+                            <kbd className="ml-1 text-[8px] font-mono font-bold opacity-60 px-1 py-0.5 rounded bg-zinc-100 text-zinc-500">Q</kbd>
+                        )}
+                    </button>
+
+                    {showQuickCall && (
+                        <div className="flex flex-col gap-2 bg-white/95 backdrop-blur-md border border-zinc-200 rounded-xl shadow-lg p-3 w-72 animate-in fade-in slide-in-from-top-2 duration-200">
+                            <label className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+                                Dial any number
+                            </label>
+                            <input
+                                ref={quickCallInputRef}
+                                type="tel"
+                                value={quickCallNumber}
+                                onChange={(e) => setQuickCallNumber(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleQuickCall();
+                                    }
+                                }}
+                                placeholder="+61 4xx xxx xxx or paste"
+                                className="w-full px-3 py-2 text-sm font-mono font-semibold tracking-wide text-zinc-900 bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                            />
+                            {quickCallNumber && (
+                                <div className="flex items-center justify-between gap-2 px-1">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Will dial</span>
+                                    <span className="text-[10px] font-mono font-bold text-zinc-700">
+                                        {normalizeToE164(quickCallNumber) || <span className="text-red-500">Invalid</span>}
+                                    </span>
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={handleQuickCall}
+                                    disabled={!normalizeToE164(quickCallNumber) || !isSystemReady || quickCalling}
+                                    className={cn(
+                                        "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all",
+                                        !normalizeToE164(quickCallNumber) || !isSystemReady
+                                            ? "bg-zinc-100 text-zinc-400 cursor-not-allowed"
+                                            : "bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 shadow-sm shadow-emerald-500/30"
+                                    )}
+                                >
+                                    {quickCalling ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Phone className="h-3.5 w-3.5 fill-current" />
+                                    )}
+                                    <span>{quickCalling ? 'Dialing...' : 'Call'}</span>
+                                </button>
+                                <button
+                                    onClick={() => { setShowQuickCall(false); setQuickCallNumber(''); }}
+                                    className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 transition-colors"
+                                >
+                                    Esc
+                                </button>
+                            </div>
+                            <p className="text-[9px] text-zinc-400 font-medium leading-tight px-1">
+                                Logged to recent calls — no contact created.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* CORNER STATUS: System Ready / Live Indicator (Top Right) */}
             <div className="absolute top-0 right-0 flex items-center gap-2">

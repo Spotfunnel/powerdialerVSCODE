@@ -10,6 +10,7 @@ import { Building2, Check, Loader2, Pencil, Plus, Trash2, Users, X, Zap } from "
 interface Campaign {
     id: string;
     name: string;
+    region?: string;
     createdAt: string;
     _count: { leads: number };
 }
@@ -20,6 +21,7 @@ export default function AdminCampaignsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [loading, setLoading] = useState(true);
     const [newName, setNewName] = useState("");
+    const [newRegion, setNewRegion] = useState("AU");
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<string | null>(null);
     const [seeding, setSeeding] = useState(false);
@@ -59,12 +61,13 @@ export default function AdminCampaignsPage() {
             const res = await fetch("/api/campaigns", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: newName.trim() })
+                body: JSON.stringify({ name: newName.trim(), region: newRegion })
             });
             if (res.ok) {
                 const campaign = await res.json();
                 setCampaigns(prev => [...prev, campaign].sort((a, b) => a.name.localeCompare(b.name)));
                 setNewName("");
+                setNewRegion("AU");
             }
         } catch (e) {
             console.error("Failed to create campaign", e);
@@ -188,6 +191,14 @@ export default function AdminCampaignsPage() {
                                 placeholder="e.g. Solar Installers"
                                 className="flex-1 h-10 px-4 rounded-md border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                             />
+                            <select
+                                value={newRegion}
+                                onChange={(e) => setNewRegion(e.target.value)}
+                                className="h-10 px-3 rounded-md border border-slate-300 bg-white text-sm font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                            >
+                                <option value="AU">🇦🇺 AU</option>
+                                <option value="US">🇺🇸 US</option>
+                            </select>
                             <Button onClick={handleCreate} disabled={creating || !newName.trim()} className="bg-teal-600 hover:bg-teal-700 text-white">
                                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create"}
                             </Button>
@@ -248,6 +259,9 @@ export default function AdminCampaignsPage() {
                                                     </div>
                                                 ) : (
                                                     <div className="flex items-center gap-2 group/name">
+                                                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${c.region === 'US' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                                            {c.region === 'US' ? '🇺🇸' : '🇦🇺'}
+                                                        </span>
                                                         <p className="font-bold text-slate-900">{c.name}</p>
                                                         <button
                                                             onClick={() => startEditing(c)}
