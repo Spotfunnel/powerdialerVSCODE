@@ -2,45 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { LeadStatus } from "@/lib/types";
 import { normalizeToE164 } from "@/lib/phone-utils";
+import { parseCSV, mapImportHeaders } from "@/lib/csv-parse";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-
-/**
- * Parses a CSV text string into rows of fields, handling quoted fields,
- * escaped quotes (""), and embedded commas/newlines per RFC 4180.
- */
-function parseCSV(text: string): string[][] {
-    const rows: string[][] = [];
-    let current: string[] = [];
-    let field = "";
-    let inQuotes = false;
-    for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
-        if (inQuotes) {
-            if (ch === '"') {
-                if (text[i + 1] === '"') { field += '"'; i++; }
-                else inQuotes = false;
-            } else {
-                field += ch;
-            }
-        } else {
-            if (ch === '"') inQuotes = true;
-            else if (ch === ',') { current.push(field); field = ""; }
-            else if (ch === '\r') { /* skip */ }
-            else if (ch === '\n') {
-                current.push(field); field = "";
-                if (current.some(f => f.trim() !== "")) rows.push(current);
-                current = [];
-            } else {
-                field += ch;
-            }
-        }
-    }
-    // Flush last field/row
-    current.push(field);
-    if (current.some(f => f.trim() !== "")) rows.push(current);
-    return rows;
-}
 
 export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
@@ -75,19 +39,7 @@ export async function POST(req: Request) {
         }
 
         const headers = parsedRows[0].map(h => h.trim());
-        const colMap = {
-            company: headers.findIndex(h => h.toLowerCase().includes("company") || h.toLowerCase().includes("business")),
-            phone: headers.findIndex(h => h.toLowerCase().includes("phone")),
-            first: headers.findIndex(h => h.toLowerCase().includes("first")),
-            last: headers.findIndex(h => h.toLowerCase().includes("last")),
-            employees: headers.findIndex(h => h.toLowerCase().includes("employee")),
-            priority: headers.findIndex(h => h.toLowerCase().includes("priority")),
-            email: headers.findIndex(h => h.toLowerCase().includes("email")),
-            location: headers.findIndex(h => h.toLowerCase().includes("location")),
-            suburb: headers.findIndex(h => h.toLowerCase().includes("suburb") || h.toLowerCase().includes("city")),
-            state: headers.findIndex(h => h.toLowerCase().includes("state")),
-            website: headers.findIndex(h => h.toLowerCase().includes("website") || h.toLowerCase().includes("url")),
-        };
+        const colMap = mapImportHeaders(headers);
 
         if (colMap.phone === -1) {
             return NextResponse.json({ error: "CSV must have a 'Phone' column" }, { status: 400 });
