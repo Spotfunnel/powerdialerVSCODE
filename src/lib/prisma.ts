@@ -1,13 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
-export enum LeadStatus {
-    READY = "READY",
-    LOCKED = "LOCKED",
-    IN_CALL = "IN_CALL",
-    DONE = "DONE",
-    BAD_NUMBER = "BAD_NUMBER",
-    PAUSED = "PAUSED",
-}
+// LeadStatus is the SINGLE source of truth in src/lib/types.ts.
+// A divergent enum used to live here — see tests/lead-status-canonical.test.ts.
 
 const globalForPrisma = global as unknown as {
     prisma: PrismaClient;

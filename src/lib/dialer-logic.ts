@@ -195,77 +195,123 @@ export async function updateLeadDisposition(
         finalContactData.phoneNumber = normalizeToE164(String(finalContactData.phoneNumber));
     }
 
-    // Update lead and release lock
-    const lead = await prisma.lead.update({
-        where: { id: leadId },
-        data: {
-            status: finalStatus,
-            lockedById: null,
-            lockedAt: null,
-            nextCallAt: nextCallAt ? new Date(nextCallAt) : undefined,
-            attempts: { increment: 1 },
-            lastCalledAt: new Date(),
-            ...(finalContactData && {
-                firstName: finalContactData.firstName || undefined,
-                lastName: finalContactData.lastName || undefined,
-                email: finalContactData.email || undefined,
-                phoneNumber: finalContactData.phoneNumber || undefined,
-            })
-        },
-    });
-
-    // Log the call/outcome — update existing initiated Call if one exists (avoids duplicates)
+    // Resolve dependent values BEFORE the transaction.
+    // user is needed for fallback fromNumber + later Google/SMS dispatch.
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { repPhoneNumber: true, id: true, name: true, email: true } });
 
-    const existingCall = await prisma.call.findFirst({
-        where: {
-            leadId: lead.id,
-            userId: userId,
-            status: "initiated",
-        },
-        orderBy: { createdAt: "desc" }
+    // Pre-tx existence check; the same predicate runs again inside the tx for atomicity.
+    // Pre-resolve a rotating fromNumber if it looks like we'll need to CREATE a Call row.
+    // selectOutboundNumber uses its own internal $transaction — must run OUTSIDE this transaction.
+    const existingCallPrecheck = await prisma.call.findFirst({
+        where: { leadId, userId, status: "initiated" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+    });
+    const resolvedFromNumber = actualFromNumber
+        || (existingCallPrecheck ? null : await getRotatingNumber(userId))
+        || user?.repPhoneNumber
+        || "UNKNOWN";
+
+    // Atomic structural writes: lead.update + call.update/create + (CALLBACK ? callback.create) + (BOOKED ? meeting.create)
+    // External side effects (Google sync, SMS dispatch, leadActivity logs) stay OUTSIDE.
+    type TxResult = {
+        lead: any;
+        meeting: { id: string; startAt: Date; endAt: Date } | null;
+    };
+    const willCreateCallback = status === 'CALLBACK' && !!nextCallAt;
+    const willCreateMeeting = status === 'BOOKED' && !!nextCallAt;
+    const meetingTitleForBooking = (() => {
+        if (!willCreateMeeting) return null;
+        const tempLead = { ...currentLead };
+        const displayName =
+            tempLead.companyName?.trim() ||
+            [tempLead.firstName, tempLead.lastName].filter(Boolean).join(' ').trim() ||
+            'Client';
+        return meetingTitle || `Demo: ${displayName}`;
+    })();
+
+    const txResult: TxResult = await prisma.$transaction(async (tx) => {
+        const updatedLead = await tx.lead.update({
+            where: { id: leadId },
+            data: {
+                status: finalStatus,
+                lockedById: null,
+                lockedAt: null,
+                nextCallAt: nextCallAt ? new Date(nextCallAt) : undefined,
+                attempts: { increment: 1 },
+                lastCalledAt: new Date(),
+                ...(finalContactData && {
+                    firstName: finalContactData.firstName || undefined,
+                    lastName: finalContactData.lastName || undefined,
+                    email: finalContactData.email || undefined,
+                    phoneNumber: finalContactData.phoneNumber || undefined,
+                })
+            },
+        });
+
+        const existingCall = await tx.call.findFirst({
+            where: { leadId: updatedLead.id, userId, status: "initiated" },
+            orderBy: { createdAt: "desc" }
+        });
+
+        if (existingCall) {
+            await tx.call.update({
+                where: { id: existingCall.id },
+                data: {
+                    status: "completed",
+                    outcome: status,
+                    notes: customMessage ? `${notes}\n\n[Dispatched Message]: ${customMessage}` : notes,
+                    ...(actualFromNumber && existingCall.fromNumber === "UNKNOWN" ? { fromNumber: actualFromNumber } : {})
+                }
+            });
+        } else {
+            await tx.call.create({
+                data: {
+                    leadId: updatedLead.id,
+                    userId,
+                    direction: "OUTBOUND",
+                    fromNumber: resolvedFromNumber,
+                    toNumber: updatedLead.phoneNumber,
+                    status: "completed",
+                    outcome: status,
+                    notes: customMessage ? `${notes}\n\n[Dispatched Message]: ${customMessage}` : notes,
+                }
+            });
+        }
+
+        if (willCreateCallback) {
+            await tx.callback.create({
+                data: {
+                    leadId: updatedLead.id,
+                    userId,
+                    callbackAt: new Date(nextCallAt as string),
+                    notes,
+                    status: 'PENDING',
+                }
+            });
+        }
+
+        let meeting: TxResult["meeting"] = null;
+        if (willCreateMeeting) {
+            const startAt = new Date(nextCallAt as string);
+            const endAt = new Date(startAt.getTime() + 30 * 60 * 1000);
+            const created = await tx.meeting.create({
+                data: {
+                    leadId: updatedLead.id,
+                    userId,
+                    startAt,
+                    endAt,
+                    title: meetingTitleForBooking || 'Demo',
+                    provider: 'PENDING',
+                },
+            });
+            meeting = { id: created.id, startAt: created.startAt, endAt: created.endAt };
+        }
+
+        return { lead: updatedLead, meeting };
     });
 
-    if (existingCall) {
-        await prisma.call.update({
-            where: { id: existingCall.id },
-            data: {
-                status: "completed",
-                outcome: status,
-                notes: customMessage ? `${notes}\n\n[Dispatched Message]: ${customMessage}` : notes,
-                // Preserve fromNumber from the initiated record (set correctly by TwiML routes)
-                ...(actualFromNumber && existingCall.fromNumber === "UNKNOWN" ? { fromNumber: actualFromNumber } : {})
-            }
-        });
-    } else {
-        // No pre-existing record — resolve fromNumber via pool
-        const resolvedFrom = actualFromNumber || (await getRotatingNumber(userId)) || user?.repPhoneNumber || "UNKNOWN";
-        await prisma.call.create({
-            data: {
-                leadId: lead.id,
-                userId: userId,
-                direction: "OUTBOUND",
-                fromNumber: resolvedFrom,
-                toNumber: lead.phoneNumber,
-                status: "completed",
-                outcome: status,
-                notes: customMessage ? `${notes}\n\n[Dispatched Message]: ${customMessage}` : notes,
-            }
-        });
-    }
-
-    // IF CALLBACK -> Create Callback entry
-    if (status === 'CALLBACK' && nextCallAt) {
-        await prisma.callback.create({
-            data: {
-                leadId: lead.id,
-                userId: userId,
-                callbackAt: new Date(nextCallAt),
-                notes: notes,
-                status: 'PENDING'
-            }
-        });
-    }
+    const lead = txResult.lead;
 
     // IF BOOKED -> Create Meeting + Google Sync + SMS Dispatch
     let dispatchResult: { calendar?: string; sms?: string; smsError?: string; calendarError?: string } = {};
@@ -304,17 +350,9 @@ export async function updateLeadDisposition(
             [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim() ||
             'Client';
 
-        // 1. Create Meeting in DB
-        const meeting = await prisma.meeting.create({
-            data: {
-                leadId: lead.id,
-                userId: userId,
-                startAt: new Date(nextCallAt),
-                endAt: new Date(new Date(nextCallAt).getTime() + 30 * 60 * 1000),
-                title: meetingTitle || `Demo: ${displayName}`,
-                provider: 'PENDING'
-            }
-        });
+        // Meeting was created atomically inside the transaction above.
+        // Re-bind here so the existing google/sms code can reference it.
+        const meeting = txResult.meeting!;
 
         // 2. Google Sync + SMS Dispatch (awaited so errors surface to caller)
         let finalMessage = customMessage;
