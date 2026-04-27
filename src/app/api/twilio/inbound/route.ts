@@ -4,6 +4,7 @@ import { validateTwilioRequest, normalizeToE164 } from '@/lib/twilio';
 import { prismaDirect, withPrismaRetry } from '@/lib/prisma';
 import { findLeadByPhone } from '@/lib/leads';
 import { sendPushNotification } from '@/lib/push';
+import { isUserOnline } from '@/lib/presence';
 
 export async function POST(req: Request) {
     try {
@@ -71,7 +72,7 @@ export async function POST(req: Request) {
             // 3. CHECK OWNER PRESENCE
             if (numberPoolItem?.owner) {
                 const owner = numberPoolItem.owner;
-                const isOnline = owner.lastSeenAt && (new Date().getTime() - new Date(owner.lastSeenAt).getTime() < 60000);
+                const isOnline = isUserOnline(owner.lastSeenAt);
 
                 if (isOnline) {
                     targetIdentity = owner.id;
@@ -85,9 +86,9 @@ export async function POST(req: Request) {
 
             // 4. FALLBACK: FIND ANY ONLINE AGENT
             if (!targetIdentity) {
-                const oneMinuteAgo = new Date(Date.now() - 60000);
+                const onlineCutoff = new Date(Date.now() - 120_000);
                 const onlineAgent = await prismaDirect.user.findFirst({
-                    where: { lastSeenAt: { gte: oneMinuteAgo } },
+                    where: { lastSeenAt: { gte: onlineCutoff } },
                     orderBy: { lastSeenAt: 'desc' },
                     select: { id: true, email: true }
                 });
