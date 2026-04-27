@@ -4,7 +4,7 @@ import { validateTwilioRequest, normalizeToE164 } from '@/lib/twilio';
 import { prismaDirect, withPrismaRetry } from '@/lib/prisma';
 import { findLeadByPhone } from '@/lib/leads';
 import { sendPushNotification } from '@/lib/push';
-import { isUserOnline } from '@/lib/presence';
+import { isUserOnline, USER_ONLINE_THRESHOLD_MS } from '@/lib/presence';
 
 export async function POST(req: Request) {
     try {
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
 
             // 4. FALLBACK: FIND ANY ONLINE AGENT
             if (!targetIdentity) {
-                const onlineCutoff = new Date(Date.now() - 120_000);
+                const onlineCutoff = new Date(Date.now() - USER_ONLINE_THRESHOLD_MS);
                 const onlineAgent = await prismaDirect.user.findFirst({
                     where: { lastSeenAt: { gte: onlineCutoff } },
                     orderBy: { lastSeenAt: 'desc' },

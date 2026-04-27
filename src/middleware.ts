@@ -47,5 +47,6 @@ export const config = {
         "/history/:path*",
         "/admin/:path*",
         "/import/:path*",
+        "/e2e-test/:path*", // dev-only harness — must require auth even if NODE_ENV is misconfigured
     ],
 };
