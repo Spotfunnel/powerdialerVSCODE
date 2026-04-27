@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { Device, Call } from "@twilio/voice-sdk";
 import { performHangup } from "@/lib/twilio-hangup";
+import { attachIncomingCallHandlers } from "@/lib/twilio-incoming";
 
 interface TwilioContextType {
     deviceState: 'offline' | 'ready' | 'error' | 'reconnecting';
@@ -181,27 +182,39 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                         navigator.vibrate([500, 200, 500, 200, 500]);
                     }
 
-                    conn.on("disconnect", () => {
-                        console.log("[Twilio] Incoming/Active Connection Disconnected");
-                        setIncomingConnection(null);
-                        setActiveConnection(null);
+                    const stopRingtone = () => {
                         ringtoneRef.current?.pause();
                         if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
-                    });
+                    };
 
-                    conn.on("accept", () => {
-                        console.log("[Twilio] Call Accepted - Moving to Active State");
-                        setActiveConnection(conn);
-                        setIncomingConnection(null);
-                        ringtoneRef.current?.pause();
-                        if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
-                        if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(0);
-                    });
-
-                    conn.on("error", (err: any) => {
-                        console.error("[Twilio] Connection Error:", err);
-                        setIncomingConnection(null);
-                        setActiveConnection(null);
+                    attachIncomingCallHandlers(conn, {
+                        onAccept: (acceptedConn) => {
+                            console.log("[Twilio] Call Accepted - Moving to Active State");
+                            setActiveConnection(acceptedConn);
+                            setIncomingConnection(null);
+                            stopRingtone();
+                            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(0);
+                        },
+                        onDisconnect: () => {
+                            console.log("[Twilio] Incoming/Active Connection Disconnected");
+                            setIncomingConnection(null);
+                            setActiveConnection(null);
+                            stopRingtone();
+                        },
+                        onError: (err) => {
+                            console.error("[Twilio] Connection Error:", err);
+                            setIncomingConnection(null);
+                            setActiveConnection(null);
+                            stopRingtone();
+                        },
+                        onCancel: () => {
+                            // Caller hung up before the rep answered. Without
+                            // this branch the ringtone loops forever and the
+                            // overlay never dismisses.
+                            console.log("[Twilio] Incoming call cancelled by caller");
+                            setIncomingConnection(null);
+                            stopRingtone();
+                        },
                     });
                 });
 

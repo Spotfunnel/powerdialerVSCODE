@@ -27,6 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import { generateAESTSlots, TimeSlot, calculateAvailability } from "@/lib/calendar-logic";
 import { useNotification } from "@/contexts/NotificationContext";
+import { handleDispositionFailure } from "@/lib/disposition-failure";
 
 const outcomes = [
     { label: "NA", status: "NO_ANSWER", color: "zinc", icon: XOctagon, key: "1" },
@@ -294,13 +295,9 @@ export function DispositionPanel() {
             }
             return dispatch;
         } catch (err: any) {
-            console.error("Disposition Refused", err);
-            addNotification({
-                type: 'error',
-                title: 'Protocol Failed',
-                message: "System Disconnected. Check uplink status."
-            });
-            return null;
+            // Centralised failure handler — guarantees submittedStatus is reset
+            // so the form unlocks on a retryable failure. See tests/disposition-failure-handler.test.ts.
+            return handleDispositionFailure({ setSubmittedStatus, addNotification, error: err });
         }
     };
 
@@ -852,8 +849,10 @@ export function DispositionPanel() {
                                             });
                                             setTimeout(() => { setShowSchedule(null); fetchNextLead(); }, 1500);
                                         } catch (e) {
-                                            console.error(e);
-                                            addNotification({ type: 'error', title: 'Override Refused', message: 'Uplink failed.' });
+                                            handleDispositionFailure({
+                                                setSubmittedStatus, addNotification, error: e,
+                                                title: 'Override Refused', message: 'Uplink failed.',
+                                            });
                                         }
                                     }
                                 }}
@@ -878,8 +877,10 @@ export function DispositionPanel() {
                                             });
                                             setTimeout(() => { setShowSchedule(null); fetchNextLead(); }, 1500);
                                         } catch (e) {
-                                            console.error(e);
-                                            addNotification({ type: 'error', title: 'Override Refused', message: 'Uplink failed.' });
+                                            handleDispositionFailure({
+                                                setSubmittedStatus, addNotification, error: e,
+                                                title: 'Override Refused', message: 'Uplink failed.',
+                                            });
                                         }
                                     }
                                 }}

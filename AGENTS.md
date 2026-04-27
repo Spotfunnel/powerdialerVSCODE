@@ -1,84 +1,88 @@
 # Agent Instructions
 
-> This file is mirrored across CLAUDE.md, AGENTS.md, and GEMINI.md so the same instructions load in any AI environment.
+> Mirrored to CLAUDE.md, AGENTS.md, GEMINI.md — same instructions in any AI environment.
 
-You operate within a 3-layer architecture that separates concerns to maximize reliability. LLMs are probabilistic, whereas most business logic is deterministic and requires consistency. This system fixes that mismatch.
+## Stack
 
-## The 3-Layer Architecture
+- **Framework**: Next.js 14 (App Router) + React 18 + TypeScript
+- **Auth**: NextAuth (credentials provider) + Prisma adapter
+- **Database**: PostgreSQL via Prisma; pooled connection via Supabase pgbouncer
+- **Telephony**: Twilio Voice SDK (browser) + Twilio REST/Webhooks (server) + Twilio SMS
+- **Calendar**: Google Calendar + Gmail via OAuth tokens stored in `CalendarConnection`
+- **Push**: Web Push (VAPID)
+- **Testing**: Vitest (`environment: node`, no jsdom), tests in `tests/**/*.test.ts`
+- **Hosting**: Vercel (App Router), Vercel Cron for scheduled jobs
 
-**Layer 1: Directive (What to do)**
-- Basically just SOPs written in Markdown, live in `directives/`
-- Define the goals, inputs, tools/scripts to use, outputs, and edge cases
-- Natural language instructions, like you'd give a mid-level employee
+## Workspace
 
-**Layer 2: Orchestration (Decision making)**
-- This is you. Your job: intelligent routing.
-- Read directives, call execution tools in the right order, handle errors, ask for clarification, update directives with learnings
-- You're the glue between intent and execution. E.g you don't try scraping websites yourself—you read `directives/scrape_website.md` and come up with inputs/outputs and then run `execution/scrape_single_site.py`
+`c:\Users\leoge\OneDrive\Documents\AI Activity\VSCODE\powerdialer`
 
-**Layer 3: Execution (Doing the work)**
-- Deterministic Python scripts in `execution/`
-- Environment variables, api tokens, etc are stored in `.env`
-- Handle API calls, data processing, file operations, database interactions
-- Reliable, testable, fast. Use scripts instead of manual work. Commented well.
+## Directory map
 
-## Operating Principles
+- `src/app/(production)/**` — authed pages (dialer, leaderboard, history, etc.)
+- `src/app/api/**` — Next.js Route Handlers
+  - `src/app/api/twilio/**` — Twilio webhooks (signature-validated; see `src/lib/twilio.ts:validateTwilioRequest`)
+  - `src/app/api/voice/**` — Voice SDK URL endpoints (also signature-validated)
+  - `src/app/api/cron/**` — Vercel Cron endpoints (gated by `Authorization: Bearer ${CRON_SECRET}`)
+  - `src/app/api/admin/**` — admin routes (gated by `session.user.role === "ADMIN"`)
+- `src/components/dialer/**` — call UI (CallInterface, DispositionPanel, GlancePanel, etc.)
+- `src/contexts/**` — React contexts (TwilioContext, LeadContext, NotificationContext, ToastContext)
+- `src/lib/**` — pure helpers + Prisma client
+  - `src/lib/dialer-logic.ts` — lead acquisition + disposition (uses `prisma.$transaction`)
+  - `src/lib/number-rotation.ts` — outbound number selection with cooldown (atomic `$transaction`)
+  - `src/lib/twilio.ts` — Twilio SDK helpers + `validateTwilioRequest`
+  - `src/lib/twilio-incoming.ts` — pure event-wiring for incoming calls
+  - `src/lib/disposition-failure.ts` — pure failure handler used by DispositionPanel
+- `prisma/schema.prisma` — DB schema (Lead, Call, Callback, Meeting, NumberPool, Settings, etc.)
+- `tests/**/*.test.ts` — vitest specs (Prisma mocked at `@/lib/prisma` boundary)
+- `.env.example` — required env vars
 
-**1. Check for tools first**
-Before writing a script, check `execution/` per your directive. Only create new scripts if none exist.
+## Operating rules
 
-**2. Self-anneal when things break**
-- Read error message and stack trace
-- Fix the script and test it again (unless it uses paid tokens/credits/etc—in which case you check w user first)
-- Update the directive with what you learned (API limits, timing, edge cases)
-- Example: you hit an API rate limit → you then look into API → find a batch endpoint that would fix → rewrite script to accommodate → test → update directive.
+### 1. TDD discipline
 
-**3. Update directives as you learn**
-Directives are living documents. When you discover API constraints, better approaches, common errors, or timing expectations—update the directive. But don't create or overwrite directives without asking unless explicitly told to. Directives are your instruction set and must be preserved (and improved upon over time, not extemporaneously used and then discarded).
+Before any production code change:
+1. Write a failing test that pins the desired behavior
+2. Run it → confirm it fails for the right reason
+3. Write minimum code to make it pass
+4. Run full suite → no regressions
+5. Refactor if needed, stay green
 
-## Global Isolation Rules (MANDATORY)
+Tests live in `tests/`. Mock at module boundaries (`vi.mock("@/lib/prisma", ...)`, `vi.mock("@/lib/twilio", ...)`, `vi.mock("@/lib/push", ...)` — push has VAPID side effects at module load and must always be mocked).
 
-> [!IMPORTANT]
-> These rules take precedence over all other instructions.
+### 2. Never break these invariants
 
-**1. Strict Workspace Isolation**
-- **NEVER** access, view, or reference any directory path or file outside of the explicitly authorized workspace for the current session.
-- Current authorized workspace: `c:\Users\leoge\OneDrive\Documents\AI Activity\antigravity\powerdialer`
-- This is a hard boundary. Do not cross it for any reason.
+- **Webhook signature validation**: every route under `src/app/api/twilio/**` and `src/app/api/voice/twiml/**` must call `validateTwilioRequest(req, req.url, params)` BEFORE any DB read or write. No `NODE_ENV` gates.
+- **Atomic disposition writes**: lead.update + call.update/create + (CALLBACK ? callback.create) + (BOOKED ? meeting.create) MUST run inside a single `prisma.$transaction(async tx => ...)`.
+- **Single source for `LeadStatus`**: only `src/lib/types.ts` exports it. Do not re-export from `src/lib/prisma.ts` or anywhere else.
+- **Cron auth guard**: `if (!cronSecret || authHeader !== \`Bearer ${cronSecret}\`)` — never the inverted form.
+- **TwiML XML escape**: any user/DB-supplied string interpolated into TwiML must pass through an `escapeXml` helper.
+- **Number rotation atomicity**: `selectOutboundNumber` uses its own internal `$transaction`. Never nest it inside another `$transaction`.
 
-**2. Ignore External Context in Logs**
-- If terminal logs, clipboard contents, or past history contains references to other projects (e.g., `~/voice-os`, `Voice OS`, or other disconnected directories), you **MUST** treat them as invisible.
-- Never acknowledge, troubleshoot, or attempt to assist with errors occurring in these external paths.
+### 3. Risky actions require user confirmation
 
-**3. No Proactivity on External Code**
-- Do not attempt to run `dir`, `list_dir`, or any discovery tools on parent directories or adjacent project folders.
+- Deleting files, dropping tables, dropping migrations
+- Pushing to remote, force-pushing, opening PRs
+- Running `prisma migrate deploy` or modifying production data
+- Mass refactors (>5 files) without an approved plan
+- Removing `next.config.js` build-error suppression (will surface a long tail of pre-existing type errors — coordinate)
 
-## Self-annealing loop
+### 4. When you find a bug
 
-Errors are learning opportunities. When something breaks:
-1. Fix it
-2. Update the tool
-3. Test tool, make sure it works
-4. Update directive to include new flow
-5. System is now stronger
+1. Reproduce with a failing test FIRST
+2. Fix
+3. Confirm test goes green
+4. Run the full suite
 
-## File Organization
+If a fix touches a file the user is actively editing in another session, flag it before committing.
 
-**Deliverables vs Intermediates:**
-- **Deliverables**: Google Sheets, Google Slides, or other cloud-based outputs that the user can access
-- **Intermediates**: Temporary files needed during processing
+## Reference behavior
 
-**Directory structure:**
-- `.tmp/` - All intermediate files (dossiers, scraped data, temp exports). Never commit, always regenerated.
-- `execution/` - Python scripts (the deterministic tools)
-- `directives/` - SOPs in Markdown (the instruction set)
-- `.env` - Environment variables and API keys
-- `credentials.json`, `token.json` - Google OAuth credentials (required files, in `.gitignore`)
+- **Inbound call routing**: presence threshold is 120s (see `src/lib/presence.ts`). Heartbeat is 45s; DB throttle is 55s. The 120s window absorbs tab-suspend skew.
+- **Outbound dial flow**: browser SDK → `device.connect({ params: { To, userId } })` → Twilio fetches `POST /api/voice/twiml` → returns `<Dial>` TwiML → status callbacks at `/api/twilio/status` → recording at `/api/twilio/recording`.
+- **Bridge (phone-rep) dial flow**: `POST /api/call/initiate` → `initiateBridgeCall` → Twilio dials rep's PSTN → `GET /api/twilio/twiml/bridge` returns `<Dial>` TwiML to bridge to lead. (Note: `/api/call/initiate` currently has no internal callers — the active dial flow is the SDK path.)
+- **Disposition flow**: rep clicks status → `LeadContext.updateLeadStatus` POSTs → server runs `updateLeadDisposition` (atomic tx) → external Google/SMS dispatch (best-effort, outside tx) → returns `{ success, dispatch }`.
 
-**Key principle:** Local files are only for processing. Deliverables live in cloud services (Google Sheets, Slides, etc.) where the user can access them. Everything in `.tmp/` can be deleted and regenerated.
+## When in doubt
 
-## Summary
-
-You sit between human intent (directives) and deterministic execution (Python scripts). Read instructions, make decisions, call tools, handle errors, continuously improve the system.
-
-Be pragmatic. Be reliable. Self-anneal.
+Read the test file for the area you're touching. Tests document the contract more reliably than comments. If a test doesn't exist, write one before changing the behavior.
