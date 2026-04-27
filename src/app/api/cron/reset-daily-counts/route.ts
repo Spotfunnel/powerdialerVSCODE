@@ -6,6 +6,12 @@ export async function GET(req: Request) {
     const authHeader = req.headers.get("authorization");
     const cronSecret = process.env.CRON_SECRET;
 
+    if (!cronSecret) {
+        // Surface the misconfiguration loudly — without this warning, every
+        // scheduled cron invocation silently 401s and number-pool dailyCount
+        // never resets, leading to mass cooldown the next morning.
+        console.error("[Cron] CRON_SECRET is not set — cron will reject all callers (including Vercel Cron). Set CRON_SECRET in Vercel project env.");
+    }
     if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

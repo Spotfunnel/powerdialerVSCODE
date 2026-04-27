@@ -45,6 +45,9 @@ describe("POST /api/twilio/voicemail — signature validation", () => {
         fd.set("CallSid", "CA1");
         const res = await voicemailPOST(postWith("https://app.test/api/twilio/voicemail", fd));
         expect(res.status).toBe(401);
+        // Pin the guard's invocation — catches a regression where the route
+        // returns hard-coded 401 without actually calling the validator.
+        expect(mockValidateTwilio).toHaveBeenCalledTimes(1);
     });
 
     it("returns TwiML with valid signature", async () => {
@@ -65,6 +68,7 @@ describe("POST /api/twilio/whisper — signature validation", () => {
         mockValidateTwilio.mockResolvedValue(false);
         const res = await whisperPOST(postWith("https://app.test/api/twilio/whisper", new FormData()));
         expect(res.status).toBe(401);
+        expect(mockValidateTwilio).toHaveBeenCalledTimes(1);
     });
 
     it("returns TwiML with valid signature", async () => {
@@ -88,6 +92,7 @@ describe("POST /api/twilio/inbound-status — signature validation", () => {
             postWith("https://app.test/api/twilio/inbound-status", fd),
         );
         expect(res.status).toBe(401);
+        expect(mockValidateTwilio).toHaveBeenCalledTimes(1);
     });
 
     it("returns TwiML with valid signature", async () => {
@@ -110,6 +115,7 @@ describe("POST /api/twilio/vm-drop-twiml — signature validation", () => {
             postWith("https://app.test/api/twilio/vm-drop-twiml", new FormData()),
         );
         expect(res.status).toBe(401);
+        expect(mockValidateTwilio).toHaveBeenCalledTimes(1);
     });
 
     it("returns TwiML with valid signature", async () => {

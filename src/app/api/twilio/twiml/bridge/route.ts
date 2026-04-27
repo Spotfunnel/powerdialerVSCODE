@@ -13,9 +13,11 @@ function escapeXml(s: string): string {
 
 export async function GET(req: Request) {
     const url = new URL(req.url);
-    const params = Object.fromEntries(url.searchParams.entries());
 
-    const isValid = await validateTwilioRequest(req, req.url, params);
+    // Twilio signs GET requests using the URL only (query string is part of
+    // the URL, not the params arg). Passing the parsed query params here would
+    // append them a second time and break the HMAC match.
+    const isValid = await validateTwilioRequest(req, req.url, {});
     if (!isValid) {
         console.error("[Security] INVALID TWILIO SIGNATURE on twiml/bridge route.");
         return new Response("Unauthorized", { status: 401 });
