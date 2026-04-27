@@ -22,9 +22,9 @@ export interface UserStats {
 }
 
 export interface DispositionDispatch {
-    calendar?: 'success' | 'failed' | 'skipped';
+    calendar?: 'sent' | 'failed' | 'skipped';
     calendarError?: string;
-    sms?: 'success' | 'failed' | 'skipped' | 'blocked-landline';
+    sms?: 'sent' | 'failed' | 'skipped' | 'blocked-landline';
     smsError?: string;
 }
 

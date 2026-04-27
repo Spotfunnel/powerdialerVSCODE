@@ -19,6 +19,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
         const { name, region } = await req.json();
         if (!name || !name.trim()) {
@@ -36,6 +38,8 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
         const { id, name, region } = await req.json();
         if (!id) {
@@ -57,6 +61,8 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     try {
         const { searchParams } = new URL(req.url);
         const id = searchParams.get("id");

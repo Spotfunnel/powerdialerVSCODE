@@ -240,9 +240,14 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
             setStats(prev => ({ ...prev, calls: (prev.calls || 0) + 1 }));
             setShowQuickCall(false);
             setQuickCallNumber('');
-        } catch (e) {
-            console.error("Quick dial error suppressed:", e);
+        } catch (e: any) {
+            console.error("Quick dial failed:", e);
             setLocalCallState('idle');
+            addNotification({
+                type: 'error',
+                title: 'Quick Call Failed',
+                message: e?.message || 'Could not place the call. Check your connection and try again.',
+            });
         } finally {
             setQuickCalling(false);
         }

@@ -110,6 +110,7 @@ export async function POST(req: Request) {
         // Use $transaction to use a SINGLE connection for the batch, avoiding "MaxClients" errors
         const BATCH_SIZE = 50;
         let updateCount = 0;
+        const failedBatches: { startIndex: number; size: number; error: string }[] = [];
 
         for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
             const batch = toUpdate.slice(i, i + BATCH_SIZE);
@@ -134,17 +135,25 @@ export async function POST(req: Request) {
                         })
                     )
                 );
+                // Only count after the transaction commits.
+                updateCount += batch.length;
             } catch (err) {
                 console.warn(`Batch update failed at index ${i}`, err);
+                failedBatches.push({
+                    startIndex: i,
+                    size: batch.length,
+                    error: err instanceof Error ? err.message : String(err),
+                });
             }
-            updateCount += batch.length;
         }
 
         return NextResponse.json({
-            success: true,
+            success: failedBatches.length === 0,
             count: uniqueRows.length,
             created: toCreate.length,
-            updated: toUpdate.length
+            updated: updateCount,
+            queuedForUpdate: toUpdate.length,
+            failedBatches,
         });
 
     } catch (error: any) {

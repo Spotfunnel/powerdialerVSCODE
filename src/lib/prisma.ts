@@ -46,32 +46,46 @@ const prismaClientSingleton = () => {
 
 export const prisma = globalForPrisma.prisma ?? prismaClientSingleton();
 
-// Direct connection for migrations and transactions
-export const prismaDirect =
-    globalForPrisma.prismaDirect ||
-    new PrismaClient({
-        datasources: {
-            db: {
-                url: process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL
-            }
-        },
+// Direct connection for migrations and transactions.
+// Lazy-instantiated via Proxy: Vercel's "Collecting page data" build phase
+// imports route modules before runtime env vars are wired, and passing an
+// explicit `datasources.db.url: undefined` to PrismaClient throws at import time.
+const prismaDirectFactory = () => {
+    if (globalForPrisma.prismaDirect) return globalForPrisma.prismaDirect;
+    const directUrl = process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL;
+    const client = new PrismaClient({
         log: ["error"],
+        // Only pass an explicit URL when one is set; otherwise let Prisma fall
+        // back to the schema's env() binding so build-time imports don't crash.
+        ...(directUrl ? { datasources: { db: { url: directUrl } } } : {}),
     });
+    if (process.env.NODE_ENV !== "production" || !globalForPrisma.prismaDirect) {
+        globalForPrisma.prismaDirect = client;
+    }
+    return client;
+};
+
+export const prismaDirect = new Proxy({} as PrismaClient, {
+    get(_target, prop) {
+        const client = prismaDirectFactory();
+        const value = (client as any)[prop];
+        return typeof value === "function" ? value.bind(client) : value;
+    },
+});
 
 if (process.env.NODE_ENV !== "production") {
     globalForPrisma.prisma = prisma;
-    globalForPrisma.prismaDirect = prismaDirect;
 } else {
     // In production, force singleton even in serverless if possible
     if (!globalForPrisma.prisma) globalForPrisma.prisma = prisma;
-    if (!globalForPrisma.prismaDirect) globalForPrisma.prismaDirect = prismaDirect;
 }
 
-// Graceful shutdown to prevent connection leaks
+// Graceful shutdown to prevent connection leaks.
+// Only disconnect prismaDirect if it was actually instantiated (proxy-lazy).
 if (typeof window === 'undefined') {
     process.on('beforeExit', async () => {
         await prisma.$disconnect();
-        await prismaDirect.$disconnect();
+        if (globalForPrisma.prismaDirect) await globalForPrisma.prismaDirect.$disconnect();
     });
 }
 
