@@ -148,17 +148,21 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                 // ---- Input device (mic) wiring ------------------------
                 // Snapshot the live device.audio map into our React state, then
                 // restore the user's session-scoped pick (if still plugged in).
+                // Must run AFTER device.register() — the AudioHelper's
+                // availableInputDevices map is only populated once the SDK has
+                // enumerated devices behind getUserMedia. Running it earlier
+                // leaves the picker stuck on an empty list.
                 const refreshInputDevices = () => {
                     try {
                         const audio = (device as any).audio;
                         if (!audio?.availableInputDevices) return;
                         const list: AudioInputDevice[] = [];
                         audio.availableInputDevices.forEach((info: MediaDeviceInfo, id: string) => {
-                            list.push({ deviceId: id, label: info.label || "Unknown microphone" });
+                            list.push({ deviceId: id, label: info.label || "Microphone" });
                         });
                         setAvailableInputDevices(list);
+                        console.log(`[Twilio] Input devices refreshed (${list.length})`);
 
-                        // Active id Twilio is using right now (if any).
                         const activeIds: string[] | undefined = audio.inputDevice
                             ? [audio.inputDevice.deviceId]
                             : Array.from(audio.inputDevices ?? []).map((d: any) => d.deviceId);
@@ -170,36 +174,38 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                     }
                 };
 
-                try {
-                    const audio = (device as any).audio;
-                    if (audio?.on) {
-                        audio.on("deviceChange", refreshInputDevices);
-                    }
-                    refreshInputDevices();
-
-                    // Restore session-scoped pick. Picker's pure helper guarantees
-                    // we only call setInputDevice with a deviceId Twilio knows about.
-                    const saved = typeof window !== "undefined"
-                        ? window.sessionStorage.getItem(MIC_STORAGE_KEY)
-                        : null;
-                    const list: AudioInputDevice[] = [];
-                    audio?.availableInputDevices?.forEach?.((info: MediaDeviceInfo, id: string) => {
-                        list.push({ deviceId: id, label: info.label });
-                    });
-                    const pick = pickInputDevice(saved, list);
-                    if (pick && audio?.setInputDevice) {
-                        audio.setInputDevice(pick).then(() => {
-                            setInputDeviceId(pick);
-                        }).catch((e: any) => console.warn("[Twilio] restore mic failed", e));
-                    }
-                } catch (e) {
-                    console.warn("[Twilio] input device wiring failed", e);
-                }
-
                 device.on("registered", () => {
                     console.log("[Twilio] Device Registered");
                     setDeviceState('ready');
                     setDeviceError(null);
+
+                    // Now that registration is complete, the AudioHelper has its
+                    // device map populated. Bind the deviceChange listener and
+                    // restore the saved mic.
+                    try {
+                        const audio = (device as any).audio;
+                        if (audio?.on) {
+                            audio.on("deviceChange", refreshInputDevices);
+                        }
+                        refreshInputDevices();
+
+                        const saved = typeof window !== "undefined"
+                            ? window.sessionStorage.getItem(MIC_STORAGE_KEY)
+                            : null;
+                        const list: AudioInputDevice[] = [];
+                        audio?.availableInputDevices?.forEach?.((info: MediaDeviceInfo, id: string) => {
+                            list.push({ deviceId: id, label: info.label });
+                        });
+                        const pick = pickInputDevice(saved, list);
+                        if (pick && audio?.setInputDevice) {
+                            audio.setInputDevice(pick).then(() => {
+                                setInputDeviceId(pick);
+                                console.log(`[Twilio] Restored saved mic: ${pick}`);
+                            }).catch((e: any) => console.warn("[Twilio] restore mic failed", e));
+                        }
+                    } catch (e) {
+                        console.warn("[Twilio] input device wiring failed", e);
+                    }
 
                     // Token Refresh (50 minutes)
                     setTimeout(async () => {
