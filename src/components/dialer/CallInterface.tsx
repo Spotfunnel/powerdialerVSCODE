@@ -10,6 +10,7 @@ import { MessageSquare } from "lucide-react";
 import { useNotification } from "@/contexts/NotificationContext";
 import { useSwipeable } from "react-swipeable";
 import { normalizeToE164 } from "@/lib/phone-utils";
+import { MicPicker } from "@/components/dialer/MicPicker";
 
 export function CallInterface({ onToggleMessages, showMessages }: { onToggleMessages?: () => void; showMessages?: boolean }) {
     const router = useRouter();
@@ -658,8 +659,9 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                 </div>
             )}
 
-            {/* CORNER STATUS: System Ready / Live Indicator (Top Right) */}
+            {/* CORNER STATUS: Mic Picker + System Ready / Live Indicator (Top Right) */}
             <div className="absolute top-0 right-0 flex items-center gap-2">
+                <MicPicker />
                 {deviceError ? (
                     <div className="text-[8px] font-bold text-red-700 flex items-center gap-1 bg-red-50 px-2 py-1 rounded border border-red-200" title={deviceError.message}>
                         <AlertCircle className="h-3 w-3 stroke-[2.5]" />

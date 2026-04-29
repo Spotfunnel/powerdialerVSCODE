@@ -4,6 +4,12 @@ import React, { createContext, useContext, useEffect, useRef, useState, ReactNod
 import { Device, Call } from "@twilio/voice-sdk";
 import { performHangup } from "@/lib/twilio-hangup";
 import { attachIncomingCallHandlers } from "@/lib/twilio-incoming";
+import { pickInputDevice, MIC_STORAGE_KEY } from "@/lib/mic-picker";
+
+export interface AudioInputDevice {
+    deviceId: string;
+    label: string;
+}
 
 interface TwilioContextType {
     deviceState: 'offline' | 'ready' | 'error' | 'reconnecting';
@@ -20,6 +26,12 @@ interface TwilioContextType {
     sendDigit: (digit: string) => void;
     outboundCallerId: string | null;
     resumeAudio: () => Promise<void>;
+    /** Live list of available input devices (mics). Refreshed on plug/unplug. */
+    availableInputDevices: AudioInputDevice[];
+    /** The deviceId currently driving Twilio's audio input, or null for browser default. */
+    inputDeviceId: string | null;
+    /** Apply a new input device + persist to sessionStorage. */
+    setInputDevice: (deviceId: string) => Promise<void>;
 }
 
 export const TwilioContext = createContext<TwilioContextType | undefined>(undefined);
@@ -38,6 +50,8 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
     const [activeCallDuration, setActiveCallDuration] = useState(0);
     const [isMuted, setIsMuted] = useState(false);
     const [outboundCallerId, setOutboundCallerId] = useState<string | null>(null);
+    const [availableInputDevices, setAvailableInputDevices] = useState<AudioInputDevice[]>([]);
+    const [inputDeviceId, setInputDeviceId] = useState<string | null>(null);
 
     // Audio & Device Refs
     const ringtoneRef = useRef<HTMLAudioElement | null>(null);
@@ -130,6 +144,57 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                     console.log("[Twilio] Device Unregistered");
                     setDeviceState('offline');
                 });
+
+                // ---- Input device (mic) wiring ------------------------
+                // Snapshot the live device.audio map into our React state, then
+                // restore the user's session-scoped pick (if still plugged in).
+                const refreshInputDevices = () => {
+                    try {
+                        const audio = (device as any).audio;
+                        if (!audio?.availableInputDevices) return;
+                        const list: AudioInputDevice[] = [];
+                        audio.availableInputDevices.forEach((info: MediaDeviceInfo, id: string) => {
+                            list.push({ deviceId: id, label: info.label || "Unknown microphone" });
+                        });
+                        setAvailableInputDevices(list);
+
+                        // Active id Twilio is using right now (if any).
+                        const activeIds: string[] | undefined = audio.inputDevice
+                            ? [audio.inputDevice.deviceId]
+                            : Array.from(audio.inputDevices ?? []).map((d: any) => d.deviceId);
+                        if (activeIds && activeIds.length > 0) {
+                            setInputDeviceId(activeIds[0]);
+                        }
+                    } catch (e) {
+                        console.warn("[Twilio] refreshInputDevices failed", e);
+                    }
+                };
+
+                try {
+                    const audio = (device as any).audio;
+                    if (audio?.on) {
+                        audio.on("deviceChange", refreshInputDevices);
+                    }
+                    refreshInputDevices();
+
+                    // Restore session-scoped pick. Picker's pure helper guarantees
+                    // we only call setInputDevice with a deviceId Twilio knows about.
+                    const saved = typeof window !== "undefined"
+                        ? window.sessionStorage.getItem(MIC_STORAGE_KEY)
+                        : null;
+                    const list: AudioInputDevice[] = [];
+                    audio?.availableInputDevices?.forEach?.((info: MediaDeviceInfo, id: string) => {
+                        list.push({ deviceId: id, label: info.label });
+                    });
+                    const pick = pickInputDevice(saved, list);
+                    if (pick && audio?.setInputDevice) {
+                        audio.setInputDevice(pick).then(() => {
+                            setInputDeviceId(pick);
+                        }).catch((e: any) => console.warn("[Twilio] restore mic failed", e));
+                    }
+                } catch (e) {
+                    console.warn("[Twilio] input device wiring failed", e);
+                }
 
                 device.on("registered", () => {
                     console.log("[Twilio] Device Registered");
@@ -336,6 +401,23 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
         }
     };
 
+    const setInputDevice = async (deviceId: string) => {
+        const device = deviceRef.current as any;
+        const audio = device?.audio;
+        if (!audio?.setInputDevice) {
+            throw new Error("Twilio audio not ready");
+        }
+        await audio.setInputDevice(deviceId);
+        setInputDeviceId(deviceId);
+        try {
+            window.sessionStorage.setItem(MIC_STORAGE_KEY, deviceId);
+        } catch (e) {
+            // Private-mode browsers can throw on sessionStorage writes; the
+            // mid-session selection still applies, only persistence is lost.
+            console.warn("[Twilio] sessionStorage write failed", e);
+        }
+    };
+
     // Keep-alive heartbeat for PWA
     useEffect(() => {
         if (!('serviceWorker' in navigator)) return;
@@ -364,7 +446,10 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
             toggleMute,
             sendDigit,
             outboundCallerId,
-            resumeAudio
+            resumeAudio,
+            availableInputDevices,
+            inputDeviceId,
+            setInputDevice,
         }}>
             {children}
             <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
