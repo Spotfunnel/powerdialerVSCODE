@@ -43,6 +43,7 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
     const [quickCallNumber, setQuickCallNumber] = useState('');
     const [quickCalling, setQuickCalling] = useState(false);
     const quickCallInputRef = useRef<HTMLInputElement>(null);
+    const [stateCounts, setStateCounts] = useState<Record<string, number>>({});
 
     const AUSTRALIAN_STATES = [
         { code: 'NSW', label: 'NSW', tz: '11+' },
@@ -139,6 +140,21 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
 
         fetchRecentCalls();
     }, []);
+
+    // Refetch state-counts whenever campaign changes OR a lead is dispositioned
+    // (currentLead.id flips). Cheap query (one GROUP BY) and keeps the picker
+    // honest about the dialable inventory.
+    useEffect(() => {
+        const url = campaignId
+            ? `/api/lead/state-counts?campaignId=${encodeURIComponent(campaignId)}`
+            : "/api/lead/state-counts";
+        fetch(url)
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data?.counts) setStateCounts(data.counts);
+            })
+            .catch(err => console.error("Failed to fetch state counts", err));
+    }, [campaignId, currentLead?.id]);
 
     // Swipe handlers for mobile interaction
     const swipeHandlers = useSwipeable({
@@ -487,28 +503,36 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
 
                     {showStateFilter && (
                         <div className="flex flex-col gap-1 bg-white/95 backdrop-blur-md rounded-xl border border-zinc-200/50 shadow-lg p-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                            {STATES.map(({ code, label, tz }) => (
-                                <label
-                                    key={code}
-                                    className={cn(
-                                        "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition-all hover:bg-teal-50/60",
-                                        selectedStates.includes(code) && "bg-teal-50/80"
-                                    )}
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedStates.includes(code)}
-                                        onChange={() => toggleState(code)}
-                                        className="h-3.5 w-3.5 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 focus:ring-1 cursor-pointer"
-                                    />
-                                    <span className="text-[11px] font-black uppercase tracking-wider text-zinc-700 flex-1">
-                                        {label}
-                                    </span>
-                                    <span className="text-[9px] font-bold text-zinc-400 font-mono">
-                                        {tz}
-                                    </span>
-                                </label>
-                            ))}
+                            {STATES.map(({ code, label }) => {
+                                const count = stateCounts[code] ?? 0;
+                                return (
+                                    <label
+                                        key={code}
+                                        className={cn(
+                                            "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition-all hover:bg-teal-50/60",
+                                            selectedStates.includes(code) && "bg-teal-50/80",
+                                            count === 0 && "opacity-50"
+                                        )}
+                                        title={`${count} ready lead${count === 1 ? "" : "s"}${campaignId ? " in this campaign" : ""}`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedStates.includes(code)}
+                                            onChange={() => toggleState(code)}
+                                            className="h-3.5 w-3.5 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 focus:ring-1 cursor-pointer"
+                                        />
+                                        <span className="text-[11px] font-black uppercase tracking-wider text-zinc-700 flex-1">
+                                            {label}
+                                        </span>
+                                        <span className={cn(
+                                            "text-[10px] font-bold font-mono tabular-nums",
+                                            count === 0 ? "text-zinc-300" : "text-teal-600",
+                                        )}>
+                                            {count.toLocaleString()}
+                                        </span>
+                                    </label>
+                                );
+                            })}
                             {selectedStates.length > 0 && (
                                 <button
                                     onClick={() => setSelectedStates([])}
