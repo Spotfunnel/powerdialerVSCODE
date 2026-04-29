@@ -95,14 +95,14 @@ export function LeadProvider({ children }: { children: ReactNode }) {
                 setHistory(prev => [...prev.slice(-29), lead]);
             }
 
-            // Release current lead's lock (await to prevent race condition)
+            // Release current lead's lock — fire-and-forget. We don't pay
+            // an extra round-trip before /next; the next-lead query passes
+            // skipId in the URL so it can't return the same lead even if
+            // the lock is still held briefly when /next reaches the server.
             if (lead && !forcedId) {
                 console.log(`[LeadContext] Releasing lead ${lead.id}`);
-                try {
-                    await fetch(`/api/leads/${lead.id}/skip`, { method: "POST" });
-                } catch (e) {
-                    console.error("[LeadContext] Release failed", e);
-                }
+                fetch(`/api/leads/${lead.id}/skip`, { method: "POST" })
+                    .catch(e => console.error("[LeadContext] Release failed", e));
             }
 
             try {

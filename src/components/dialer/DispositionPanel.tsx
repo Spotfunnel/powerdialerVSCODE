@@ -287,12 +287,31 @@ export function DispositionPanel() {
         const customMessage = data?.customMessage;
 
         try {
-            const dispatch = await updateLeadStatus(status, nextCallAt, userId, notes, contactData, customMessage, timezoneOffset.toString(), includeMeetLink, includeCalendarLink, meetingTitle);
-
-            // Auto-skip AFTER status update succeeds (prevents lost notes/outcomes)
+            // For non-BOOKED dispositions: fire the disposition write and the
+            // next-lead fetch in PARALLEL so the UI advances instantly instead
+            // of paying ~2s of sequential round-trips (PATCH → skip → next).
+            //
+            // This is safe because `updateLeadStatus` reads
+            // `currentLeadRef.current` synchronously at call-time and
+            // constructs the PATCH URL with that lead's id BEFORE the await
+            // boundary. So the disposition is guaranteed to be saved against
+            // the lead the rep was looking at, not the next one.
             if (status !== 'BOOKED') {
+                const dispositionPromise = updateLeadStatus(
+                    status, nextCallAt, userId, notes, contactData, customMessage,
+                    timezoneOffset.toString(), includeMeetLink, includeCalendarLink, meetingTitle,
+                ).catch(err =>
+                    handleDispositionFailure({ setSubmittedStatus, addNotification, error: err })
+                );
+                // Don't await the disposition — let it complete in background.
+                // Failures are surfaced via the catch above.
                 fetchNextLead();
+                return dispositionPromise;
             }
+
+            // BOOKED stays sequential: we need the dispatch result to render
+            // calendar/SMS success/failure toasts before moving on.
+            const dispatch = await updateLeadStatus(status, nextCallAt, userId, notes, contactData, customMessage, timezoneOffset.toString(), includeMeetLink, includeCalendarLink, meetingTitle);
             return dispatch;
         } catch (err: any) {
             // Centralised failure handler — guarantees submittedStatus is reset
