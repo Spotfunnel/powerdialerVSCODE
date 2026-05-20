@@ -82,10 +82,69 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     // Helper to simulate network delay
     // const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // PREFETCH: as soon as a lead is shown, we acquire+lock the NEXT one in
+    // the background. When the rep dispositions, we swap synchronously to
+    // the prefetched lead — no /api/lead/next round-trip in the critical path.
+    // Lock expires server-side after 30min, so leaving the tab idle has no
+    // long-term cost. Filter changes invalidate the prefetch and release it.
+    const prefetchedRef = useRef<{ lead: Lead; campaignId: string | null; states: string[] } | null>(null);
+    const prefetchInFlightRef = useRef<Promise<void> | null>(null);
+
+    const doPrefetch = useCallback(() => {
+        if (prefetchInFlightRef.current) return;
+        const lead = currentLeadRef.current;
+        if (!lead) return;
+        const campaign = campaignIdRef.current;
+        const states = [...selectedStatesRef.current];
+
+        const run = async () => {
+            try {
+                const qs: string[] = [];
+                if (campaign) qs.push(`campaignId=${encodeURIComponent(campaign)}`);
+                if (states.length > 0) qs.push(`states=${states.join(",")}`);
+                qs.push(`skipId=${lead.id}`);
+                const url = `/api/lead/next?${qs.join("&")}`;
+                const res = await fetch(url, { method: "GET" });
+                if (!res.ok) return;
+                const data = await res.json();
+                prefetchedRef.current = { lead: data, campaignId: campaign, states };
+                console.log(`[LeadContext] Prefetched next: ${data.id} (${data.companyName})`);
+            } catch (e) {
+                console.warn("[LeadContext] Prefetch failed", e);
+            } finally {
+                prefetchInFlightRef.current = null;
+            }
+        };
+        prefetchInFlightRef.current = run();
+    }, []);
+
     const fetchNextLead = useCallback(async (forcedId?: string) => {
         const lead = currentLeadRef.current;
         const campaign = campaignIdRef.current;
         const states = selectedStatesRef.current;
+
+        // Fast path: prefetched lead matches current filters → swap instantly,
+        // no spinner, no network in the critical path.
+        if (!forcedId) {
+            if (!prefetchedRef.current && prefetchInFlightRef.current) {
+                // A prefetch is in flight — wait briefly so we can use it.
+                await prefetchInFlightRef.current;
+            }
+            const cached = prefetchedRef.current;
+            const sameFilters = cached
+                && cached.campaignId === campaign
+                && JSON.stringify(cached.states) === JSON.stringify(states);
+            if (cached && sameFilters) {
+                prefetchedRef.current = null;
+                if (lead) {
+                    setHistory(prev => [...prev.slice(-29), lead]);
+                    fetch(`/api/leads/${lead.id}/skip`, { method: "POST" }).catch(() => {});
+                }
+                console.log(`[LeadContext] Instant swap to prefetched: ${cached.lead.id} (${cached.lead.companyName})`);
+                setCurrentLead(cached.lead);
+                return;
+            }
+        }
 
         setLoading(true);
 
@@ -197,6 +256,24 @@ export function LeadProvider({ children }: { children: ReactNode }) {
     const addEvent = (event: CalendarEvent) => {
         setEvents(prev => [...prev, event]);
     };
+
+    // Drive the prefetch: whenever currentLead settles (or filters change),
+    // invalidate stale prefetch and kick off a fresh one.
+    useEffect(() => {
+        if (!currentLead?.id) return;
+        const cached = prefetchedRef.current;
+        const sameFilters = cached
+            && cached.campaignId === campaignId
+            && JSON.stringify(cached.states) === JSON.stringify(selectedStates);
+        if (cached && !sameFilters) {
+            // Stale prefetch (filters changed) — release its lock so other reps can pick it up.
+            fetch(`/api/leads/${cached.lead.id}/skip`, { method: "POST" }).catch(() => {});
+            prefetchedRef.current = null;
+        }
+        if (!prefetchedRef.current) {
+            doPrefetch();
+        }
+    }, [currentLead?.id, campaignId, selectedStates, doPrefetch]);
 
     // Keyboard Shortcuts
     useEffect(() => {
