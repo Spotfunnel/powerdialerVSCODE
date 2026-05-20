@@ -602,9 +602,26 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                 )}
             </div>
 
-            {/* QUICK CALL (Top Right, sits above the system status indicator) */}
-            {!isConnected && !isIncoming && (
-                <div className="absolute top-6 right-2 z-30 flex flex-col items-end gap-2">
+            {/* QUICK CALL + SMS (Top Right, sits above the system status indicator) */}
+            <div className="absolute top-6 right-2 z-30 flex flex-col items-end gap-2">
+                {onToggleMessages && currentLead && (
+                    <button
+                        onClick={() => onToggleMessages()}
+                        className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-sm border",
+                            showMessages
+                                ? "bg-teal-600 text-white border-teal-600 shadow-teal-500/20"
+                                : "bg-white/80 text-zinc-600 hover:bg-white border-zinc-200 hover:text-teal-700 backdrop-blur-sm"
+                        )}
+                        title={`SMS ${currentLead.firstName || currentLead.companyName}`}
+                    >
+                        {showMessages ? <X className="h-3 w-3 stroke-[3]" /> : <MessageSquare className="h-3 w-3 stroke-[3]" />}
+                        <span>SMS</span>
+                    </button>
+                )}
+
+                {!isConnected && !isIncoming && (
+                    <>
                     <button
                         onClick={() => setShowQuickCall(prev => !prev)}
                         disabled={localCallState !== 'idle'}
@@ -680,8 +697,9 @@ export function CallInterface({ onToggleMessages, showMessages }: { onToggleMess
                             </p>
                         </div>
                     )}
-                </div>
-            )}
+                    </>
+                )}
+            </div>
 
             {/* CORNER STATUS: Mic Picker + System Ready / Live Indicator (Top Right) */}
             <div className="absolute top-0 right-0 flex items-center gap-2">
