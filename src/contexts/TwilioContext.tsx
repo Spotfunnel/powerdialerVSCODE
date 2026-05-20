@@ -133,11 +133,23 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                     return;
                 }
 
+                // edge=sydney primary with singapore/roaming fallback — Singapore (~6,300km)
+                // is much closer than Ashburn (~16,000km) so failover latency stays sane if
+                // sydney is degraded. Opus codec preferred. maxAverageBitrate 48k = Opus
+                // wideband-speech max (RFC-7587 upper bound for speech-only). dscp marks
+                // packets so QoS-aware routers prioritize VoIP. forceAggressiveIceNomination
+                // establishes media path ~1-2s faster (matters for outbound where audio
+                // should be live before the prospect picks up). closeProtection prevents
+                // accidental tab-close hangups mid-call.
                 const device = new Device(data.token, {
                     codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU],
                     enableRingingState: true,
-                    edge: ['sydney', 'ashburn', 'roaming'],
-                    maxCallSignalingTimeoutMs: 30000
+                    edge: ['sydney', 'singapore', 'roaming'],
+                    maxCallSignalingTimeoutMs: 30000,
+                    maxAverageBitrate: 48000,
+                    dscp: true,
+                    forceAggressiveIceNomination: true,
+                    closeProtection: true,
                 } as any);
 
                 device.on("unregistered", () => {
@@ -175,7 +187,7 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                 };
 
                 device.on("registered", () => {
-                    console.log("[Twilio] Device Registered");
+                    console.log(`[Twilio] Device Registered (edge=${(device as any).edge ?? "unknown"})`);
                     setDeviceState('ready');
                     setDeviceError(null);
 
@@ -338,7 +350,20 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
             // BEFORE the real TwiML route also called it — double-counting every dial.
             // The caller ID is now set from the Call record after the TwiML route runs.
 
-            const connection = await device.connect({ params: { To: phoneNumber, userId: identity } });
+            // rtcConstraints forces high-quality mic capture on desktop Chrome/Firefox
+            // (iOS Safari ignores most of these and uses its own defaults regardless).
+            const connection = await device.connect({
+                params: { To: phoneNumber, userId: identity },
+                rtcConstraints: {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 48000,
+                        channelCount: 1,
+                    },
+                },
+            } as any);
 
             // Listen for remote tracks for outbound calls
             connection.on('track', handleRemoteTrack);
@@ -368,7 +393,17 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                 setActiveConnection(incomingConnection);
                 setIncomingConnection(null);
 
-                incomingConnection.accept();
+                incomingConnection.accept({
+                    rtcConstraints: {
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: 48000,
+                            channelCount: 1,
+                        },
+                    },
+                } as any);
             } catch (e) {
                 console.error("[Twilio] Accept failed:", e);
                 setIncomingConnection(null);
