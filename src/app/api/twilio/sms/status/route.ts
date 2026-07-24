@@ -41,13 +41,13 @@ export async function POST(req: Request) {
         try {
             const fs = require('fs');
             const path = require('path');
-            const tmpDir = path.join(process.cwd(), '.tmp');
-
-            if (!fs.existsSync(tmpDir)) {
-                fs.mkdirSync(tmpDir, { recursive: true });
-            }
-
-            const deadLetterPath = path.join(tmpDir, 'dead_letter_status.json');
+            const os = require('os');
+            // Use the OS temp dir (writable on Vercel: /tmp). process.cwd()/.tmp
+            // is read-only in the serverless runtime, so the previous buffer
+            // silently threw EROFS and the "safely buffered" log lied. The 503
+            // below is the real safety net (Twilio retries); this is a best-
+            // effort local trace only.
+            const deadLetterPath = path.join(os.tmpdir(), 'dead_letter_status.json');
             const payload = {
                 timestamp: new Date().toISOString(),
                 error: error instanceof Error ? error.message : String(error),
@@ -55,9 +55,9 @@ export async function POST(req: Request) {
             };
 
             fs.appendFileSync(deadLetterPath, JSON.stringify(payload) + "\n");
-            console.log("[SMS Status] Update safely buffered to dead_letter_status.json");
+            console.log(`[SMS Status] Buffered to ${deadLetterPath} (ephemeral — 503 retry is the durable path)`);
         } catch (bufferErr) {
-            console.error("[SMS Status] FAILED TO BUFFER STATUS:", bufferErr);
+            console.error("[SMS Status] FAILED TO BUFFER STATUS (relying on Twilio 503 retry):", bufferErr);
         }
 
         return new NextResponse("Service Unavailable", { status: 503 });

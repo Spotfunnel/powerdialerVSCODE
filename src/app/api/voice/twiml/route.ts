@@ -3,6 +3,7 @@ import Twilio from 'twilio';
 import { prisma } from '@/lib/prisma';
 import { selectOutboundNumber } from '@/lib/number-rotation';
 import { validateTwilioRequest } from '@/lib/twilio';
+import { normalizeToE164 } from '@/lib/phone-utils';
 
 // This is the webhook Twilio calls when the browser makes a call
 export async function POST(req: Request) {
@@ -66,17 +67,34 @@ export async function POST(req: Request) {
             return new NextResponse(response.toString(), { headers: { "Content-Type": "text/xml" } });
         }
 
-        // Dialing Logic
-        const dial = response.dial({ callerId });
+        // Guard: never emit <Dial> with an empty callerId. Twilio rejects it
+        // with error 21213 ("No 'From' number specified") and the rep hears
+        // dead air with zero feedback. This fires when number rotation returns
+        // null (pool exhausted / all on cooldown / transient DB error) AND
+        // Settings has no fallback twilioFromNumbers.
+        if (!callerId) {
+            console.error("[TwiML] No caller-ID available (rotation + Settings fallback both empty). Refusing to dial.");
+            response.say("No calling number is available. Please contact your administrator.");
+            return new NextResponse(response.toString(), { headers: { "Content-Type": "text/xml" } });
+        }
 
-        // Normalize Target Number (handle both AU and US)
+        // Dialing Logic.
+        // answerOnBridge: don't mark the parent (browser) leg answered until the
+        // callee picks up, so the rep hears the carrier's REAL ringback instead
+        // of Twilio's synthetic tone, the first word isn't clipped, and
+        // answered-at/duration reflect the actual conversation. Audio on the
+        // browser->Twilio hop stays Opus/48k; the Twilio->mobile hop is
+        // narrowband G.711 by construction (PSTN), which no attribute changes.
+        const dial = response.dial({ callerId, answerOnBridge: true });
+
+        // Normalize Target Number (handle AU/US, including AU 1300/1800/13
+        // shared-cost numbers). Defense-in-depth: even if a stale browser
+        // passes "+1300xxx" — which historically slipped through the import
+        // path and made Twilio reject the dial with error 13224 — the shared
+        // normaliser repairs it to "+611300xxx" before <Dial> is emitted.
         let target = to;
-        if (!target.startsWith('+') && !target.startsWith('client:')) {
-            const digits = target.replace(/\D/g, '');
-            if (digits.startsWith('0')) target = '+61' + digits.substring(1);
-            else if (digits.length === 10 && /^[2-9]/.test(digits)) target = '+1' + digits;
-            else if (digits.length === 11 && digits.startsWith('1')) target = '+' + digits;
-            else target = '+' + digits;
+        if (!target.startsWith('client:')) {
+            target = normalizeToE164(target) || target;
         }
 
         if (target.startsWith('client:')) {
@@ -89,18 +107,24 @@ export async function POST(req: Request) {
         // Quick-call dials with no matching Lead are logged with leadId: null so they
         // still appear in recent-calls history.
         if (userId) {
-            prisma.lead.findFirst({ where: { phoneNumber: to } }).then(lead => {
-                prisma.call.create({
-                    data: {
-                        userId,
-                        fromNumber: callerId,
-                        toNumber: to,
-                        direction: 'OUTBOUND',
-                        status: 'initiated',
-                        leadId: lead?.id ?? null,
-                    }
-                }).catch(e => console.error("[TwiML] Call Log Error:", e));
-            });
+            prisma.lead.findFirst({ where: { phoneNumber: to } })
+                .then(lead =>
+                    prisma.call.create({
+                        data: {
+                            userId,
+                            fromNumber: callerId,
+                            toNumber: to,
+                            direction: 'OUTBOUND',
+                            status: 'initiated',
+                            leadId: lead?.id ?? null,
+                        }
+                    })
+                )
+                // Single catch covers BOTH the lead lookup and the call.create —
+                // previously the outer .then() had no .catch(), so a failed
+                // lead.findFirst was an unhandled rejection and the call was
+                // never logged with no trace.
+                .catch(e => console.error("[TwiML] Call log failed (lookup or create):", e));
         }
 
         return new NextResponse(response.toString(), {

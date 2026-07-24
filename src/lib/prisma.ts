@@ -105,7 +105,11 @@ export async function withPrismaRetry<T>(
 
             if (isConnectionError && i < maxRetries - 1) {
                 console.warn(`[Prisma] Connection error, retrying in ${delay * (i + 1)}ms... (${i + 1}/${maxRetries})`);
-                await prisma.$disconnect();
+                // Do NOT $disconnect() here: this wrapper guards work on BOTH
+                // `prisma` (pooled) and `prismaDirect`, and disconnecting the
+                // pooled client during a prismaDirect retry both misses the
+                // stuck connection and can disrupt other in-flight pooled
+                // queries. Prisma re-establishes the connection on next use.
                 await new Promise(res => setTimeout(res, delay * (i + 1)));
                 continue;
             }

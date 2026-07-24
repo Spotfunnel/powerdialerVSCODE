@@ -12,6 +12,7 @@ import { Lead } from "@/types/dialer";
 import { PIPELINE_STAGES } from "@/lib/types";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useToast } from "@/contexts/ToastContext";
+import { displayCompanyName } from "@/lib/lead-display";
 
 // DND Kit Imports
 import {
@@ -179,7 +180,7 @@ function SortableLeadCard({ lead, color, onDial, onDelete, isOverlay = false }: 
             </div>
 
             <div className="relative z-10">
-                <h4 className="font-black text-lg sm:text-2xl text-black italic mb-1 sm:mb-2 leading-tight tracking-tight truncate" title={lead.companyName}>{lead.companyName || "Unknown Company"}</h4>
+                <h4 className="font-black text-lg sm:text-2xl text-black italic mb-1 sm:mb-2 leading-tight tracking-tight truncate" title={displayCompanyName(lead)}>{displayCompanyName(lead)}</h4>
                 <p className="text-[9px] sm:text-[11px] font-black text-zinc-400 uppercase tracking-[0.2em] truncate">{lead.firstName} {lead.lastName}</p>
             </div>
 

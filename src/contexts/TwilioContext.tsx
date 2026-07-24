@@ -150,6 +150,11 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
                     dscp: true,
                     forceAggressiveIceNomination: true,
                     closeProtection: true,
+                    // Pin ICE restart on (SDK default is true today) so a future
+                    // default change can't silently disable mid-call media
+                    // recovery — the fix for garbled/dropped audio when a rep's
+                    // WiFi flaps or they switch networks mid-call.
+                    enableIceRestart: true,
                 } as any);
 
                 device.on("unregistered", () => {

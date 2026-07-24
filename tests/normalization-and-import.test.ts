@@ -348,4 +348,46 @@ describe("mapImportHeaders — aliasing", () => {
         const colMap = mapImportHeaders(["Phone", "Suburb", "City"]);
         expect(colMap.suburb).toBe(1);
     });
+
+    it("recognises 'Organisation' as a company column", () => {
+        const colMap = mapImportHeaders(["Organisation", "Phone"]);
+        expect(colMap.company).toBe(0);
+    });
+
+    it("recognises 'Organization' (US spelling) as a company column", () => {
+        const colMap = mapImportHeaders(["Organization", "Phone"]);
+        expect(colMap.company).toBe(0);
+    });
+
+    it("recognises 'Account Name' as a company column", () => {
+        const colMap = mapImportHeaders(["Account Name", "Phone"]);
+        expect(colMap.company).toBe(0);
+    });
+
+    it("recognises 'Practice Name' as a company column", () => {
+        const colMap = mapImportHeaders(["Practice Name", "Phone"]);
+        expect(colMap.company).toBe(0);
+    });
+
+    it("recognises 'Trading Name' as a company column", () => {
+        const colMap = mapImportHeaders(["Trading Name", "Phone"]);
+        expect(colMap.company).toBe(0);
+    });
+
+    it("recognises 'Client Name' as a company column", () => {
+        const colMap = mapImportHeaders(["Client Name", "Phone"]);
+        expect(colMap.company).toBe(0);
+    });
+
+    it("recognises 'Firm' as a company column", () => {
+        const colMap = mapImportHeaders(["Firm", "Phone"]);
+        expect(colMap.company).toBe(0);
+    });
+
+    it("does not falsely match 'First Name' or 'Last Name' as company", () => {
+        const colMap = mapImportHeaders(["First Name", "Last Name", "Phone"]);
+        expect(colMap.company).toBe(-1);
+        expect(colMap.first).toBe(0);
+        expect(colMap.last).toBe(1);
+    });
 });

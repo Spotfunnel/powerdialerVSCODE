@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Zap, Loader2 } from "lucide-react";
+import { classifyLoginError } from "@/lib/login-error";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -41,17 +42,9 @@ export default function LoginPage() {
             if (result?.error) {
                 console.error("[LOGIN] Auth error from result:", result.error);
 
-                // Specific check for database connection pool issues
-                const isDbError = result.error.toLowerCase().includes('database') ||
-                    result.error.toLowerCase().includes('pool') ||
-                    result.error.toLowerCase().includes('max clients') ||
-                    result.error.toLowerCase().includes('connection');
-
-                if (isDbError) {
-                    setError("Server is busy (Database connection pool full). Please wait a moment and try again.");
-                } else {
-                    setError("Invalid email or password");
-                }
+                const { kind, message } = classifyLoginError(result.error);
+                console.error("[LOGIN] Classified as:", kind);
+                setError(message);
                 setLoading(false);
             } else if (result?.ok) {
                 console.log("[LOGIN] Success! Redirecting to /dialer");

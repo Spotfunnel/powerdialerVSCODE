@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { LeadStatus } from "@/lib/types";
 import { normalizeToE164 } from "@/lib/phone-utils";
 import { parseCSV, mapImportHeaders } from "@/lib/csv-parse";
+import { fallbackCompanyName } from "@/lib/lead-display";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 
@@ -56,11 +57,23 @@ export async function POST(req: Request) {
             const phone = normalizeToE164(rawPhone);
             if (!phone || phone.length < 10) continue;
 
+            const rawCompany = colMap.company > -1 ? cols[colMap.company]?.trim() : "";
+            const rawFirst = colMap.first > -1 ? cols[colMap.first]?.trim() : "";
+            const rawLast = colMap.last > -1 ? cols[colMap.last]?.trim() : "";
+            const hasCompanyName = !!rawCompany;
+            // Schema requires companyName non-null; fall back to phone (real
+            // data) rather than a sentinel. In practice every dashboard CSV
+            // has a company column, so this fallback is defensive only.
+            const companyName = hasCompanyName
+                ? rawCompany!
+                : fallbackCompanyName({ phoneNumber: phone });
+
             processedRows.push({
                 phoneNumber: phone,
-                companyName: (colMap.company > -1 ? cols[colMap.company] : "Unknown Company") || "Unknown Company",
-                firstName: colMap.first > -1 ? cols[colMap.first] : undefined,
-                lastName: colMap.last > -1 ? cols[colMap.last] : "",
+                companyName,
+                hasCompanyName,
+                firstName: rawFirst || undefined,
+                lastName: rawLast || "",
                 employees: colMap.employees > -1 ? parseInt(cols[colMap.employees]) || 0 : 0,
                 priority: colMap.priority > -1 ? (cols[colMap.priority].toUpperCase().includes("A") ? "A" : "B") : "B",
                 email: colMap.email > -1 ? cols[colMap.email] : null,
@@ -94,7 +107,9 @@ export async function POST(req: Request) {
             if (existingPhones.has(row.phoneNumber)) {
                 toUpdate.push(row);
             } else {
-                toCreate.push({ ...row, source: "IMPORT_NEW" });
+                // Strip the internal hasCompanyName flag before persisting
+                const { hasCompanyName: _drop, ...persisted } = row;
+                toCreate.push({ ...persisted, source: "IMPORT_NEW" });
             }
         }
 
@@ -121,8 +136,11 @@ export async function POST(req: Request) {
                         prisma.lead.update({
                             where: { phoneNumber: row.phoneNumber },
                             data: {
-                                companyName: row.companyName !== "Unknown Company" ? row.companyName : undefined,
-                                firstName: row.firstName !== "Friend" ? row.firstName : undefined,
+                                // Only overwrite companyName when the CSV row actually
+                                // provided one — never clobber an existing real value
+                                // with our phone/name fallback.
+                                ...(row.hasCompanyName ? { companyName: row.companyName } : {}),
+                                firstName: row.firstName || undefined,
                                 lastName: row.lastName || undefined,
                                 // Only update if provided
                                 email: row.email || undefined,

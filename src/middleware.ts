@@ -26,6 +26,15 @@ export default withAuth(
                 if (path === "/" || path.startsWith("/login")) {
                     return true;
                 }
+                // Local-dev-only: allow Playwright to drive harness pages
+                // without a session. Vercel Preview/Production still require
+                // auth because they run with NODE_ENV=production.
+                if (
+                    process.env.NODE_ENV !== "production" &&
+                    path.startsWith("/e2e-test/")
+                ) {
+                    return true;
+                }
                 return !!token;
             },
         },
@@ -45,6 +54,8 @@ export const config = {
         "/calendar/:path*",
         "/contacts/:path*",
         "/history/:path*",
+        "/kpi/:path*",
+        "/profile/:path*",
         "/admin/:path*",
         "/import/:path*",
         "/e2e-test/:path*", // dev-only harness — must require auth even if NODE_ENV is misconfigured

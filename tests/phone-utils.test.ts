@@ -34,6 +34,42 @@ describe("normalizeToE164 - AU landline formats", () => {
     });
 });
 
+describe("normalizeToE164 - AU 1300/1800/13 shared-cost numbers", () => {
+    // Regression: previously these fell through to the catch-all and produced
+    // "+1300..." (US country code), which Twilio rejects with error 13224
+    // ("invalid phone number"). Every outbound call to a 1300/1800 lead failed.
+    it("1300668366 -> +611300668366 (NOT +1300668366)", () => {
+        expect(normalizeToE164("1300668366")).toBe("+611300668366");
+        expect(normalizeToE164("1300668366")).not.toBe("+1300668366");
+    });
+    it("1800032415 -> +611800032415 (NOT +1800032415)", () => {
+        expect(normalizeToE164("1800032415")).toBe("+611800032415");
+        expect(normalizeToE164("1800032415")).not.toBe("+1800032415");
+    });
+    it("formatted '1300 724 005' -> +611300724005", () => {
+        expect(normalizeToE164("1300 724 005")).toBe("+611300724005");
+    });
+    it("formatted '1800-865-005' -> +611800865005", () => {
+        expect(normalizeToE164("1800-865-005")).toBe("+611800865005");
+    });
+    it("AU 13xxxx 6-digit shortcode -> +6113xxxx", () => {
+        expect(normalizeToE164("131456")).toBe("+61131456");
+    });
+    it("already-correct +611300668366 stays as-is", () => {
+        expect(normalizeToE164("+611300668366")).toBe("+611300668366");
+    });
+    it("already-correct +611800032415 stays as-is", () => {
+        expect(normalizeToE164("+611800032415")).toBe("+611800032415");
+    });
+    it("legacy malformed '+1300668366' is repaired to +611300668366", () => {
+        // Defensive: if a previously-broken value gets re-normalised, fix it.
+        expect(normalizeToE164("+1300668366")).toBe("+611300668366");
+    });
+    it("legacy malformed '+1800032415' is repaired to +611800032415", () => {
+        expect(normalizeToE164("+1800032415")).toBe("+611800032415");
+    });
+});
+
 describe("normalizeToE164 - US numbers", () => {
     it("10-digit US number -> +1XXXXXXXXXX", () => {
         expect(normalizeToE164("8504390035")).toBe("+18504390035");

@@ -51,7 +51,9 @@ export function parseCSV(text: string): string[][] {
  * match) are documented per field below.
  */
 export interface ImportColumnMap {
-    /** matches "company" or "business" */
+    /** matches "company", "business", "organisation"/"organization", "account",
+     * "client", "practice", "trading", "entity", or "firm". Excludes headers
+     * that look like a person column ("first name"/"last name"). */
     company: number;
     /** matches "phone" */
     phone: number;
@@ -86,8 +88,24 @@ export interface ImportColumnMap {
 export function mapImportHeaders(headers: string[]): ImportColumnMap {
     const lower = headers.map(h => h.toLowerCase());
     const find = (predicate: (h: string) => boolean) => lower.findIndex(predicate);
+    const isPersonNameHeader = (h: string) => h.includes("first name") || h.includes("last name");
+    const isCompanyHeader = (h: string) => {
+        if (isPersonNameHeader(h)) return false;
+        return (
+            h.includes("company") ||
+            h.includes("business") ||
+            h.includes("organisation") ||
+            h.includes("organization") ||
+            h.includes("account") ||
+            h.includes("client") ||
+            h.includes("practice") ||
+            h.includes("trading") ||
+            h.includes("entity") ||
+            h.includes("firm")
+        );
+    };
     return {
-        company: find(h => h.includes("company") || h.includes("business")),
+        company: find(isCompanyHeader),
         phone: find(h => h.includes("phone")),
         first: find(h => h.includes("first")),
         last: find(h => h.includes("last")),

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Phone, Clock, FileAudio, User, Building2, Calendar, ArrowLeft, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { displayCompanyName } from "@/lib/lead-display";
 
 interface CallLog {
     id: string;
@@ -136,7 +137,7 @@ export default function HistoryPage() {
                                             </span>
                                             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5 mt-0.5">
                                                 <Building2 className="h-3 w-3" />
-                                                {log.lead?.companyName || 'Unknown Company'}
+                                                {log.lead ? displayCompanyName(log.lead) : '—'}
                                                 {log.lead?.phoneNumber && <span className="text-zinc-300 ml-1">• {log.lead.phoneNumber}</span>}
                                             </span>
                                         </div>

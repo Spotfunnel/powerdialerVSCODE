@@ -2,8 +2,11 @@ import { NextResponse } from 'next/server';
 import twilio from 'twilio';
 import { getCredentials } from '@/lib/twilio';
 import { prisma } from '@/lib/prisma';
+import { requireAdmin } from '@/lib/require-admin';
 
 export async function POST(req: Request) {
+    const denied = await requireAdmin();
+    if (denied) return denied;
     try {
         const { phoneNumber } = await req.json();
         if (!phoneNumber) return NextResponse.json({ error: "Missing phoneNumber" }, { status: 400 });

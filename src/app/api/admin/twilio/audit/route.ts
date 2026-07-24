@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import twilio from 'twilio';
 import { prisma } from '@/lib/prisma';
 import { getCredentials } from '@/lib/twilio';
+import { requireAdmin } from '@/lib/require-admin';
 
 export async function GET() {
     return handleAudit();
@@ -12,6 +13,8 @@ export async function POST() {
 }
 
 async function handleAudit() {
+    const denied = await requireAdmin();
+    if (denied) return denied;
     try {
         console.log("[Audit API] Starting Audit...");
         let creds;

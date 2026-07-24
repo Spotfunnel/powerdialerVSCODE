@@ -17,9 +17,9 @@ import { fallbackCompanyName } from "../src/lib/lead-display";
 import { LeadStatus } from "../src/lib/types";
 
 const SOURCES: { campaignName: string; csvPath: string }[] = [
-  { campaignName: "Med Spa",   csvPath: "C:/Users/leoge/Downloads/sms_ready_medspa.csv" },
-  { campaignName: "Cars",      csvPath: "C:/Users/leoge/Downloads/sms_ready_cars.csv" },
-  { campaignName: "Insurance", csvPath: "C:/Users/leoge/Downloads/sms_ready_insurance.csv" },
+  { campaignName: "Pool",    csvPath: "C:/Users/leoge/Downloads/leads_pool.csv" },
+  { campaignName: "Roofers", csvPath: "C:/Users/leoge/Downloads/leads_roofers.csv" },
+  { campaignName: "HVAC",    csvPath: "C:/Users/leoge/Downloads/leads_hvac.csv" },
 ];
 
 async function ensureCampaign(name: string): Promise<{ id: string; created: boolean }> {

@@ -26,6 +26,19 @@ export function normalizeToE164(phoneNumber: string): string {
         digits = digits.substring(1);
     }
 
+    // AU shared-cost numbers: 1300 / 1800 (10 digits) and 13xxxx (6 digits).
+    // These MUST be checked BEFORE the generic E.164/US branches, because:
+    //   - "+1300668366" with the bare-+ prefix would otherwise return as-is
+    //     (Twilio then rejects with error 13224 — invalid phone number).
+    //   - "1300668366" with no + would otherwise fall through to the catch-all
+    //     and become "+1300668366" with a bogus US country code.
+    // The correct AU E.164 form is "+611300...", "+611800...", or "+6113xxxx".
+    const auSharedCost10 = digits.length === 10 && (digits.startsWith('1300') || digits.startsWith('1800'));
+    const auSharedCost6 = digits.length === 6 && digits.startsWith('13');
+    if (auSharedCost10 || auSharedCost6) {
+        return `+61${digits}`;
+    }
+
     // Already in E.164 with country code
     if (clean.startsWith('+') && digits.length >= 10) {
         return `+${digits}`;

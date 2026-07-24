@@ -246,12 +246,29 @@ export function DispositionPanel() {
                 });
             }
 
-            // Show premium success banner
-            addNotification({
-                type: 'success',
-                title: 'Transmission Secured',
-                message: `Protocol dispatched to ${bookingData.firstName}. Calendar Invite Dispatch Confirmed.`
-            });
+            // Only claim success for the parts that actually dispatched. The
+            // meeting + lead are already committed (atomic tx), but calendar/SMS
+            // are best-effort — a dep-load failure or Google error leaves
+            // dispatch.calendar !== 'sent'. Showing "Confirmed" then would be a
+            // false confirmation (H1): the rep believes an invite went out when
+            // nothing did.
+            const calendarSent = dispatch?.calendar === 'sent';
+            if (calendarSent) {
+                addNotification({
+                    type: 'success',
+                    title: 'Transmission Secured',
+                    message: `Protocol dispatched to ${bookingData.firstName}. Calendar Invite Dispatch Confirmed.`
+                });
+            } else if (dispatch?.calendar !== 'failed') {
+                // Not 'sent' and not already surfaced as 'failed' above → the
+                // dispatch never ran (deps failed to load). Meeting is saved,
+                // but be honest that the invite did not go out.
+                addNotification({
+                    type: 'info',
+                    title: 'Meeting Saved — Invite Not Sent',
+                    message: `${bookingData.firstName}'s meeting is booked, but the calendar invite could not be dispatched automatically. Send it manually or check the Google connection in Profile.`
+                });
+            }
 
             // Cleanup after a delay
             setTimeout(() => {

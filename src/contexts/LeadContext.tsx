@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, Re
 import { useSearchParams } from "next/navigation";
 import { useNotification } from "@/contexts/NotificationContext";
 import { normalizeToE164 } from "@/lib/phone-utils";
+import { extractDispatch } from "@/lib/disposition-response";
 import { Lead } from "@/types/dialer";
 
 
@@ -240,11 +241,18 @@ export function LeadProvider({ children }: { children: ReactNode }) {
 
             const result = await res.json().catch(() => ({}));
 
+            // Fail loudly on a non-2xx: fetch does NOT reject on 4xx/5xx, so a
+            // failed disposition (atomic-tx error, "Lead not found", DB drop)
+            // would otherwise be swallowed and the rep told it succeeded — the
+            // disposition silently lost, a false "booked" banner shown. Throwing
+            // here routes to DispositionPanel's handleDispositionFailure.
+            const dispatch = extractDispatch<DispositionDispatch>(res.ok, res.status, result);
+
             if (contactData) {
                 setCurrentLead(prev => prev ? { ...prev, ...contactData } : null);
             }
 
-            return result?.dispatch || null;
+            return dispatch;
 
         } catch (e) {
             console.error("Failed to update lead status", e);
