@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 import { prisma, withPrismaRetry } from "@/lib/prisma";
 import { normalizeToE164 } from "@/lib/phone-utils";
+import { fallbackCompanyName } from "@/lib/lead-display";
 
 export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
@@ -140,7 +141,14 @@ export async function POST(req: Request) {
             ...body,
             phoneNumber,
             email: email || undefined,
-            companyName: companyName || undefined,
+            // companyName is a required (non-null) column. A blank company here
+            // used to become `undefined` -> Prisma "Argument companyName is
+            // missing" -> 500, so any contact saved without a company silently
+            // failed. Fall back to the phone number (displayCompanyName renders
+            // it cleanly) so the save always succeeds.
+            companyName: (typeof companyName === "string" && companyName.trim())
+                ? companyName.trim()
+                : fallbackCompanyName({ phoneNumber }),
             firstName: firstName || undefined,
             lastName: lastName || undefined,
             suburb: suburb || undefined,
