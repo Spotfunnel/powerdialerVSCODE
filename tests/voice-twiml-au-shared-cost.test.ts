@@ -104,15 +104,16 @@ describe("POST /api/voice/twiml — AU 1300/1800 shared-cost dial contract", () 
         expect(xml).toContain("<Number>+611300668366</Number>");
     });
 
-    it("dials standard AU mobile +614... unchanged, with answerOnBridge", async () => {
+    it("dials standard AU mobile +614... unchanged", async () => {
         const res = await POST(fakeRequest({
             To: "+61412345678",
             From: "client:user-1",
         }));
         const xml = await res.text();
         expect(xml).toContain("<Number>+61412345678</Number>");
-        // answerOnBridge: real carrier ringback, no first-word clip, accurate answered-at.
-        expect(xml).toContain('answerOnBridge="true"');
+        // Must NOT use answerOnBridge: AU carriers often send no early ringback,
+        // so the rep would hear silence and think the call failed (dur=0, no error).
+        expect(xml).not.toContain("answerOnBridge");
     });
 
     it("dials standard US +1 unchanged", async () => {

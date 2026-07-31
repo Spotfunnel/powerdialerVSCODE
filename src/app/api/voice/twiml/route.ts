@@ -79,13 +79,13 @@ export async function POST(req: Request) {
         }
 
         // Dialing Logic.
-        // answerOnBridge: don't mark the parent (browser) leg answered until the
-        // callee picks up, so the rep hears the carrier's REAL ringback instead
-        // of Twilio's synthetic tone, the first word isn't clipped, and
-        // answered-at/duration reflect the actual conversation. Audio on the
-        // browser->Twilio hop stays Opus/48k; the Twilio->mobile hop is
-        // narrowband G.711 by construction (PSTN), which no attribute changes.
-        const dial = response.dial({ callerId, answerOnBridge: true });
+        // NOTE: intentionally NOT using answerOnBridge. With it, the rep's
+        // (browser) leg stays unanswered until the callee picks up; AU landline
+        // carriers often send no early ringback to the SIP trunk, so the rep
+        // hears silence and thinks the call failed, and unanswered calls show
+        // dur=0 with no error. Answering the parent immediately gives Twilio's
+        // synthetic ringback — clear "it's connecting" feedback for the rep.
+        const dial = response.dial({ callerId });
 
         // Normalize Target Number (handle AU/US, including AU 1300/1800/13
         // shared-cost numbers). Defense-in-depth: even if a stale browser
