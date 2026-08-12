@@ -28,7 +28,10 @@ import { useCallback } from "react";
 
 export default function ContactsPage() {
     const [searchTerm, setSearchTerm] = useState("");
-    const [statusFilter, setStatusFilter] = useState<string>("READY");
+    // Default to ALL: this is the CRM repository view. Defaulting to READY hid
+    // every lead that had been called (LOCKED/TALKING/dispositioned) or came in
+    // inbound (NEW), with no dropdown to change it — so saved leads looked lost.
+    const [statusFilter, setStatusFilter] = useState<string>("ALL");
     const [leads, setLeads] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const router = useRouter();

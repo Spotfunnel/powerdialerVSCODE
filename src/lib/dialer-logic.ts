@@ -100,8 +100,17 @@ export async function getNextLead(userId: string, forcedLeadId?: string, campaig
                 SELECT id
                 FROM "Lead"
                 WHERE
-                    (status = 'READY' OR (status = 'CALLBACK' AND "nextCallAt" <= NOW()))
-                    AND "lockedById" IS NULL
+                    (
+                        -- fresh, unlocked work
+                        (status = 'READY' AND "lockedById" IS NULL)
+                        OR (status = 'CALLBACK' AND "nextCallAt" <= NOW() AND "lockedById" IS NULL)
+                        -- stale-lock recovery: a call that failed or a rep who
+                        -- closed the tab leaves a lead stuck LOCKED/TALKING with
+                        -- a lock older than 30 min. Return it to circulation so
+                        -- the queue can't silently drain. Dispositioned leads
+                        -- have lockedAt = NULL and are NOT recovered here.
+                        OR ("lockedAt" IS NOT NULL AND "lockedAt" < NOW() - INTERVAL '30 minutes')
+                    )
                     AND (${campaignId}::text IS NULL OR "campaignId" = ${campaignId})
                     AND (${expandedStates}::text[] IS NULL OR "state" = ANY(${expandedStates}::text[]))
                     AND (${skipId || null}::text IS NULL OR id != ${skipId || null})
